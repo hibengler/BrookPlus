@@ -1,0 +1,325 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file gather.br
+  \brief A brook example on how to use the gather command
+
+  This program shows how to use the gather operation via two tests.
+  gather_dependent/gather_dependent_2D shows how to gather based off
+  of a dependent texture read in 1D and 2D.
+  gather_direct/gather_direct_2D shows how to gather based off
+  of a constant value from the stream.
+
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+static int retval = 0;
+
+/**
+ *
+ * \brief				Gather from an 1D input array
+ *						based on an index fetched from 
+ *						a stream
+ *
+ * \param	index		Index stream
+ * \param	a			Input array
+ * \param	b			Output stream
+ *
+*/
+kernel void gather_dependent(float index<>, float a[], out float b<>)
+{
+    b = a[index];
+}
+
+/**
+ *
+ * \brief				Gather from a 2D input array
+ *						based on an index fetched from 
+ *						a stream
+ *
+ * \param	index		Index stream
+ * \param	a			Input array
+ * \param	b			Output stream
+ *
+*/
+kernel void gather_dependent_2D(float2 index<>, float a[][], out float b<>)
+{
+    b = a[index.y][index.x];
+}
+
+/**
+ *
+ * \brief				Gather from a 1D input array
+ *						based on a constant index 
+ *
+ * \param	index		Index stream
+ * \param	a			Input array
+ * \param	b			Output stream
+ *
+*/
+kernel void gather_direct(float2 index, float a[], out float b<>)
+{
+    b = a[index.x];
+}
+
+
+/**
+ *
+ * \brief				Gather from a 2D input array
+ *						based on a constant index 
+ *
+ * \param	index		Index stream
+ * \param	a			Input array
+ * \param	b			Output stream
+ *
+*/
+kernel void gather_direct_2D(float2 index, float a[][], out float b<>)
+{
+    b = a[index.y][index.x];
+}
+
+#define castToFloat(a) (static_cast<float>(a))
+
+int main(int argc, char** argv)
+{
+    struct infoRec cmd;
+
+    float *data1D[4] = {NULL};
+    float *data2D[3] = {NULL};
+    float2 *data2D2  =  NULL;
+    float2 index = float2(3, 4);
+    unsigned int Height, Width, Length, i;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+
+    Height = cmd.Height;
+    Width = cmd.Width;
+    Length = cmd.Height * cmd.Width;
+
+    //adjust the value of index.xy to avoid out of bound access in "verify"
+    //index starts from 0
+    if (index.y >= castToFloat(Height))
+        index.y = castToFloat(Height) - 1.0f;
+    if (index.x >= castToFloat(Width))
+        index.x = castToFloat(Width) - 1.0f;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Allocate memory
+   	/////////////////////////////////////////////////////////////////////////
+    for (i = 0; i < 4; ++i)
+    {
+        if (!(data1D[i] = allocate_mat_f(1, Length)))
+        {
+            retval = -1;
+            goto cleanup;
+        }
+    }
+
+    for (i = 0; i < 3; ++i)
+    {
+        if (!(data2D[i] = allocate_mat_f(Height, Width)))
+        {
+            retval = -1;
+            goto cleanup;
+        }
+    }
+
+    if (!(data2D2 = allocate_mat_f2(Height, Width)))
+    {
+        retval = -1;
+        goto cleanup;
+    }
+
+    fill_mat_f(data1D[0], 1, Length, Length, POS);
+    fill_mat_f(data1D[1], 1, Length, Length, RANDOM);
+    fill_mat_f2((float2*)data2D2, Height, Width, Height, POS);
+    fill_mat_f((float*)data2D[0], Height, Width, Height, RANDOM);
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print input data 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("Index Input data 1D:", "%3.2lf ", data1D[0], 1, Length);
+        print_mat_f("Index Input data 2D:", "%3.2lf ", (float*)data2D[0], Height, Width);
+        print_mat_f("Input data 1D:", "%3.2lf ", data1D[1], 1, Length);
+        print_mat_f2("Input data 2D:", "%3.2lf ",(float2*)data2D2, Height, Width);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f("Index Input data 1D:", "%3.2lf ", data1D[0], 1, Length);
+        print_mat_f("Index Input data 2D:", "%3.2lf ", (float*)data2D[0], 1, Width);
+        print_mat_f("Input data 1D:", "%3.2lf ", data1D[1], 1, Length);
+        print_mat_f2("Input data 2D:", "%3.2lf ", (float2*)data2D2, 1, Width);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Brook code block
+	/////////////////////////////////////////////////////////////////////////
+    {
+        float index1<Length>;
+        float a1<Length>;
+        float b1<Length>;
+        float c1<Length>;
+        float2 index2<Height, Width>;
+        float a2<Height, Width>;
+        float b2<Height, Width>;
+        float c2<Height, Width>;
+        
+		// Record GPU Total time
+		Start(0);
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+			// Write to stream 
+			streamRead(index1, data1D[0]);
+			streamRead(a1, data1D[1]);
+			streamRead(index2, data2D2);
+			streamRead(a2, data2D[0]);
+
+			// Run the brook program 
+			gather_dependent(index1, a1, b1);
+			gather_dependent_2D(index2, a2, b2);
+			gather_direct(index, a1, c1);
+			gather_direct_2D(index, a2, c2);
+
+			// dependent gather
+			streamWrite(b1, data1D[2]);
+			streamWrite(b2, data2D[1]);
+			// direct gather
+			streamWrite(c1, data1D[3]);
+			streamWrite(c2, data2D[2]);
+        }
+        Stop(0);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Print results if requested
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("Output data 1D:", "%3.2lf ", data1D[2], 1, Length);
+        print_mat_f("Output data 2D:", "%3.2lf ", (float*)data2D[1], Height, Width);
+        print_mat_f("Direct Output data 1D:", "%3.2lf ", data1D[3], 1, Length);
+        print_mat_f("Direct Output data 2D:", "%3.2lf ", (float*)data2D[2], Height, Width);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f("Output data 1D:", "%3.2lf ", data1D[2], 1, Length);
+        print_mat_f("Output data 2D:", "%3.2lf ", (float*)data2D[1], 1, Width);
+        print_mat_f("Direct Output data 1D:", "%3.2lf ", data1D[3], 1, Length);
+        print_mat_f("Direct Output data 2D:", "%3.2lf ", (float*)data2D[2], 1, Width);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time");
+		printf( "%-8d%-8d%-16d%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+	if (cmd.Verify)
+    {
+        int res = 0;
+
+		printf("-e Verify correct output.\n");
+
+        res += compare_mat_f(data1D[1], data1D[2], 1, Length);
+        res += compare_mat_f((float*)data2D[0], (float*)data2D[1], Height, Width);
+        res += floatCompare( data1D[3][(int)index.x], data1D[1][(int)index.x] );
+        res += floatCompare( data2D[2][(int)index.y * Width + (int)index.x], data2D[0][(int)index.y * Width + (int)index.x]);
+        if (res)
+        {
+            printf("%s: Failed!\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+            retval = 0;
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+	/////////////////////////////////////////////////////////////////////////
+cleanup:
+    for (i = 0; i < 4; ++i)
+    {
+        if (data1D[i])
+        {
+            free(data1D[i]);
+        }
+    }
+    for (i = 0; i < 3; ++i)
+    {
+        if (data2D[i])
+        {
+            free(data2D[i]);
+        }
+    }
+    if (data2D2)
+    {
+        free(data2D2);
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+	return retval;
+}

@@ -1,0 +1,355 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file struct.br
+  \brief Tests the struct capability of brook
+
+  \i struct_gather tests that gather works with structs in a brook kernel.
+  \i struct_input tests the ability of using a struct as the input stream.
+  \i struct_output tests the ability of using a struct as the output stream.
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+typedef struct PairRec 
+{
+    float first;
+    float second;
+} Pair;
+
+static int retval = 0;
+
+/**
+ * \brief			Kernel demonstrating gather
+ *					with structs 
+ *
+ * \param index		Stream of indices
+ * \param pairs		Input array of struct type Pair
+ * \param results	Output stream 
+ *
+*/
+kernel void struct_gather(float index<>, Pair pairs[], out float result<>)
+{
+    Pair p = pairs[index];
+    result = p.first + p.second;
+}
+
+/**
+ * \brief			Reference CPU implementation 
+ *					of gather with structs 
+ *
+ * \param index		Stream of indices
+ * \param p			Pointer to list of struct type Pair
+ * \param r			Output array 
+ * \param Length	Length of input list
+ *
+*/
+void struct_gather_cpu(float* index, Pair* p, float* r, unsigned int Length)
+{
+    unsigned int i;
+    for (i = 0; i < Length; ++i)
+    {
+        Pair *a = &p[(int)index[i]];
+        r[i] = a->first + a->second;
+    }
+}
+
+/**
+ * \brief			Kernel demonstrating gather
+ *					with input stream of struct types 
+ *
+ * \param p			Input stream of struct type Pair
+ * \param result	Output stream 
+ *
+*/
+kernel void struct_input(Pair p<>, out float result<>)
+{
+    result = p.first + p.second;
+}
+
+/**
+ * \brief			Reference CPU implementation 
+ *					of input arrays of struct type
+ *
+ * \param p			Pointer to list of struct type Pair
+ * \param r			Output array 
+ * \param Length	Length of input list
+ *
+*/
+void struct_input_cpu(Pair* p, float* r, unsigned int Length)
+{
+    unsigned int i;
+    for (i = 0; i < Length; ++i)
+    {
+        r[i] = p[i].first + p[i].second;
+    }
+}
+
+/**
+ * \brief			Kernel demonstrating gather
+ *					with output stream of struct types 
+ *
+ * \param first		Input stream 
+ * \param second	Input stream 
+ * \param p			Output stream of struct type Pair
+ *
+*/
+kernel void struct_output(float first<>, float second<>, out Pair p<>)
+{
+    p.first = first;
+    p.second = second;
+}
+
+/**
+ * \brief			Reference CPU implementation 
+ *					of output arrays of struct type
+ *
+ * \param f			Pointer to list of float types
+ * \param s			Pointer to list of float types
+ * \param p			Pointer to list of struct type Pair
+ * \param Length	Length of input list
+ *
+*/
+void struct_output_cpu(float* f, float* s, Pair* p, unsigned int Length)
+{
+    unsigned int i;
+    for (i = 0; i < Length; ++i)
+    {
+        p[i].first = f[i];
+        p[i].second = s[i];
+    }
+}
+
+int main(int argc, char** argv)
+{
+    Pair  *pData1D[2] = {NULL}; // 0 = input, 1 = output
+    float *data1D[3]  = {NULL}; // 0 = indices, 1 = output
+    struct infoRec cmd;
+    unsigned int Length, i;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+    Length = cmd.Height * cmd.Width;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Allocate memory
+   	/////////////////////////////////////////////////////////////////////////
+    for (i = 0; i < 2; ++i)
+    {
+        pData1D[i] = (Pair *)malloc(sizeof *pData1D[i] * Length);
+        data1D[i] = allocate_mat_f(1, Length);
+        if (!data1D[i] || !data1D[i])
+        {
+            retval = -1;
+            goto cleanup;
+        }
+    }
+    if (!(data1D[2] = allocate_mat_f(1, Length)))
+    {
+        retval = -1;
+        goto cleanup;
+    }
+
+
+    fill_mat_f((float*)data1D[0], 1, Length, Length, LINEAR_INT);
+    fill_mat_f2((float2*)pData1D[0], 1, Length, Length, RANDOM);
+
+	/////////////////////////////////////////////////////////////////////////
+    // Print input data 
+   	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f2("Input Data 1D: ", "%3.2lf ", (float2*)pData1D[0], 1, Length);
+        print_mat_f("Indices 1D: ", "%3.2lf ", data1D[0], 1, Length);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f2("Input Data 1D: ", "%3.2lf ", (float2*)pData1D[0], 1, Length);
+        print_mat_f("Indices 1D: ", "%3.2lf ", data1D[0], 1, Length);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Brook code block
+   	/////////////////////////////////////////////////////////////////////////
+    {
+        float indices1D<Length>;
+        float goutput1D<Length>; // struct_gather 1D output
+        float ioutput1D<Length>; // struct_input 1D output
+        Pair  pairs1D<Length>;
+        Pair  pairs1D2<Length>;
+		
+		// Record GPU Total time
+        Start(0);
+        // Put write to stream here
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+			streamRead(pairs1D, pData1D[0]);
+			streamRead(indices1D, data1D[0]);
+
+			// Run the brook program here
+            struct_gather(indices1D, pairs1D, goutput1D);
+            struct_input(pairs1D, ioutput1D);
+            struct_output(ioutput1D, goutput1D, pairs1D2);
+
+			// Write data back from stream here
+			streamWrite(goutput1D, data1D[1]);
+			streamWrite(ioutput1D, data1D[2]);
+			streamWrite(pairs1D2, pData1D[1]);
+        }
+        Stop(0);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Print results if requested
+   	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("Gather Output Data: ", "%3.2lf ", (float*)data1D[1], 1, Length);
+        print_mat_f("Input Output Data: ", "%3.2lf ", (float*)data1D[2], 1, Length);
+        print_mat_f2("Output Output Data: ", "%3.2lf ", (float2*)pData1D[1], 1, Length);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f("Output Data: ", "%3.2lf ", (float*)data1D[1], 1, Length/10);
+        print_mat_f("Input Output Data: ", "%3.2lf ", (float*)data1D[2], 1, Length/10);
+        print_mat_f2("Output Output Data: ", "%3.2lf ", (float2*)pData1D[1], 1, Length/10);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time");
+		printf( "%-8d%-8d%-16d%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        int res = 0;
+        float *cpu1D[2] = {NULL};
+        Pair  *pcpu1D   =  NULL;
+        for (i = 0; i < 2; ++i)
+        {
+            if (!(cpu1D[i] = allocate_mat_f(1, Length)))
+            {
+                retval = -1;
+                goto cpu_cleanup;
+            }
+        }
+        if (!(pcpu1D = (Pair *)malloc(sizeof *pcpu1D * Length)))
+        {
+            retval = -1;
+            goto cpu_cleanup;
+        }
+
+		printf("-e Verify correct output.\n");
+
+        struct_gather_cpu(data1D[0], pData1D[0], cpu1D[0], Length);
+        struct_input_cpu(pData1D[0], cpu1D[1], Length);
+        struct_output_cpu(cpu1D[0], cpu1D[1], pcpu1D, Length);
+        res += compare_mat_f(cpu1D[0], data1D[1], 1, Length);
+        res += compare_mat_f(cpu1D[1], data1D[2], 1, Length);
+        res += compare_mat_f2((float2*)pcpu1D, (float2*)pData1D[1], 1, Length);
+        if (res)
+        {
+            printf("%s: Failed!\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+            retval = 0;
+        }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+   	/////////////////////////////////////////////////////////////////////////
+cpu_cleanup:
+        if (pcpu1D)
+        {
+            free(pcpu1D);
+        }
+        if (cpu1D[0])
+        {
+            free(cpu1D[0]);
+        }
+        if (cpu1D[1])
+        {
+            free(cpu1D[1]);
+        }
+    }
+cleanup:
+    for (i = 0; i < 2; ++i)
+    {
+        if (pData1D[i])
+        {
+            free(pData1D[i]);
+        }
+        if (data1D[i])
+        {
+            free(data1D[i]);
+        }
+    }
+    if (data1D[2])
+    {
+        free(data1D[2]);
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+	return retval;
+}

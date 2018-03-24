@@ -1,0 +1,35 @@
+////////////////////////////////////////////////////////////////////////////////
+//!
+//! \file   scatter.br
+//!
+//! \brief  Defines a function which uses scatter for transpose
+//!
+//! The kernel reads from a position (i,j) and writes to a position (m,n)
+//!
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+//!
+//! \brief  Kernel which writes to an arbitrary position
+//!
+//! The kernel reads the current position(i,j) using 'indexof'. A value is read 
+//! from the position (i,j) and is written to a position (m,n) where:-
+//!     m = j
+//!         and 
+//!     n = i
+//!
+//! \param  i   Input(gather) stream
+//! \param  o   Output stream
+//!
+////////////////////////////////////////////////////////////////////////////////
+
+kernel void
+scatterTransposeGPU(float input<>, out float output[][])
+{
+    // Get the position of o in index.x
+    int2 index = instance().xy;
+
+    output[index.x][index.y] = input;
+}
+
+

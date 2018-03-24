@@ -1,0 +1,537 @@
+/****************************************************************************
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file optimized_matmult.br
+  \brief An optimized matrix multiplication algorithm using 8 MRT's
+    
+  Matrix multiplication algorithm using 8 MRT's to work on 8 seperate parts
+  of the matrix in concurrently. Wikipedia entry:
+  http://en.wikipedia.org/wiki/Matrix_multiplication
+
+  The current implimentation breaks each 8x4 subblock into a 2x2 block
+  and a 2x2 block and stored in row major order.
+
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+static int retval = 0;
+
+/**
+* \brief      Divides matrix into parts
+
+* \param matrix       input matrix 
+* \param matrixParts  array of matrix parts
+* \param width        width of input matrix 
+* \param height       height of input matrix
+* \param parts        no of parts to be divided
+*/
+void divideMatrix(float* matrix, float* matrixParts[], unsigned int width, unsigned int height, unsigned int parts)
+{
+    unsigned int index = 0;
+    unsigned int i = 0;
+    for(i = 0; i < height; i++)
+    {
+        index = i % parts;
+        memcpy(&matrixParts[index][(i / parts) * width], &matrix[i * width], width * sizeof(float));
+    }
+}
+
+/**
+* \brief      Merges parts matrices into final matrix 
+
+* \param matrixParts  array of matrix parts
+* \param matrix       final matrix 
+* \param width        width of final matrix 
+* \param height       height of final matrix
+* \param parts        no of parts 
+*/
+void combineMatrix(float* matrixParts[], float* matrix, unsigned int width, unsigned int height, unsigned int parts)
+{
+    unsigned int i = 0;
+    unsigned int j = 0;
+    for(i = 0; i < height; i = i + parts)
+    {
+        for(j = 0; j < parts; j++)
+        {
+            memcpy(&matrix[(i + j) * width], &matrixParts[j][(i / parts) * width],  width * sizeof(float));
+        }
+    }
+}
+
+/**
+* \brief 8 MRT multiplication
+*/
+    kernel void
+optimized_matmult(int loopVar0,
+        float4 A1[][], float4 A2[][], float4 A3[][], float4 A4[][],
+        float4 A5[][], float4 A6[][], float4 A7[][], float4 A8[][],
+        float4 B1[][], float4 B2[][], float4 B3[][], float4 B4[][],
+        out float4 C1<>, out float4 C2<>, out float4  C3<>, out float4 C4<>,
+        out float4 C5<>, out float4 C6<>, out float4  C7<>, out float4 C8<>)
+{
+    // Setting zero
+    float4 zero = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    // Declaring and initializing accumulators
+    float4 accumulator1 = zero;
+    float4 accumulator2 = zero;
+    float4 accumulator3 = zero;
+    float4 accumulator4 = zero;
+    float4 accumulator5 = zero;
+    float4 accumulator6 = zero;
+    float4 accumulator7 = zero;
+    float4 accumulator8 = zero;
+
+    // Row number of output position
+    int i = instance().y;
+
+    // Column number of output position
+    int j = instance().x;
+
+    int k = 0;
+    for(; k < loopVar0; ++k)
+    {
+        // Fetching values from A
+        float4 A11 = A1[i][k];  float4 A22 = A2[i][k];
+        float4 A33 = A3[i][k];  float4 A44 = A4[i][k];
+        float4 A55 = A5[i][k];  float4 A66 = A6[i][k];
+        float4 A77 = A7[i][k];  float4 A88 = A8[i][k];
+
+        // Fetching values from B
+        float4 B11 = B1[k][j];  float4 B22 = B2[k][j];
+        float4 B33 = B3[k][j];  float4 B44 = B4[k][j];
+
+        accumulator1 += A11.xxxx * B11.xyzw + A11.yyyy * B22.xyzw + A11.zzzz * B33.xyzw + A11.wwww * B44.xyzw;
+        accumulator2 += A22.xxxx * B11.xyzw + A22.yyyy * B22.xyzw + A22.zzzz * B33.xyzw + A22.wwww * B44.xyzw;
+        accumulator3 += A33.xxxx * B11.xyzw + A33.yyyy * B22.xyzw + A33.zzzz * B33.xyzw + A33.wwww * B44.xyzw;
+        accumulator4 += A44.xxxx * B11.xyzw + A44.yyyy * B22.xyzw + A44.zzzz * B33.xyzw + A44.wwww * B44.xyzw;
+        accumulator5 += A55.xxxx * B11.xyzw + A55.yyyy * B22.xyzw + A55.zzzz * B33.xyzw + A55.wwww * B44.xyzw;
+        accumulator6 += A66.xxxx * B11.xyzw + A66.yyyy * B22.xyzw + A66.zzzz * B33.xyzw + A66.wwww * B44.xyzw;
+        accumulator7 += A77.xxxx * B11.xyzw + A77.yyyy * B22.xyzw + A77.zzzz * B33.xyzw + A77.wwww * B44.xyzw;
+        accumulator8 += A88.xxxx * B11.xyzw + A88.yyyy * B22.xyzw + A88.zzzz * B33.xyzw + A88.wwww * B44.xyzw;
+    }
+
+    C1 = accumulator1;
+    C2 = accumulator2;
+    C3 = accumulator3;
+    C4 = accumulator4;
+    C5 = accumulator5;
+    C6 = accumulator6;
+    C7 = accumulator7;
+    C8 = accumulator8;
+}
+
+/**
+* \brief Naive matmult implementation for comparison with CPU 
+*/
+   void 
+matmultCPU(float* a, float* b, float* c, int m, int k, int n)
+{
+    int y;
+    for (y = 0; y < m; y++)
+    {
+        int x;
+        for (x = 0; x < n; x++)
+        {
+            float temp = 0;
+            int z;
+            for (z = 0; z < k; z++)
+            {
+                temp += a[y * k + z] * b[z * n + x];
+            }
+
+            c[y * n + x] = temp;
+        }
+    }
+}
+
+/**
+* \brief	Compare two float values within 
+		a threshold epsilon
+*/
+int floatCmp(float a, float b)
+{
+    float epsilon = (float)1e-5;
+    float re = (b - a) / a;
+    return fabs(re) > epsilon;  
+}
+
+
+int main(int argc, char** argv)
+{
+
+    float* Atemp = NULL;
+    float* Btemp = NULL;
+    float* Ctemp = NULL;
+    struct infoRec cmd;
+    unsigned int i = 0;
+
+    //float tempValue;
+    int m4 = 0;
+    int k4 = 0;
+    int n4 = 0;
+    int M  = 0;
+    int K  = 0;
+    int N  = 0;
+
+    float* Aparts[8] = {NULL};
+    float* Bparts[4] = {NULL};
+    float* Cparts[8] = {NULL};
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	// 1 = CPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+    Setup(1);
+
+	ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+
+    // Shift right then left to make sure we are a multiple of 8
+    cmd.Height = (cmd.Height >> 3) << 3;
+    cmd.Width = (cmd.Width >> 3) << 3;
+    if (cmd.Height != cmd.Width)
+    {
+        cmd.Height = cmd.Width;
+    }
+    if (cmd.Height < 8 || cmd.Width < 8)
+    {
+        if (!cmd.Quiet)
+        {
+            fprintf(stderr, "Error: Minimum size for Width/Height is 8.\n");
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+        }
+        return retval;
+    }
+    M = cmd.Height;
+    K = cmd.Width;
+    N = cmd.Height;
+    m4 = M >> 3;
+    k4 = K >> 2;
+    n4 = N >> 2;
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Allocate memory
+   	/////////////////////////////////////////////////////////////////////////
+    Atemp = allocate_mat_f(M, K);
+    Btemp = allocate_mat_f(K, N);
+    Ctemp = allocate_mat_f(M, N);
+
+    if (!Atemp || !Btemp || !Ctemp)
+    {
+        fprintf(stderr, "Error: Memory Allocation.\n");
+        retval = 1;
+        goto cleanup;
+    }
+
+    for (i = 0; i < 8; i++)
+    {
+        Aparts[i] = allocate_mat_f(m4, k4 << 2);
+        Cparts[i] = allocate_mat_f(m4, n4 << 2);
+        if (!Aparts[i] || !Cparts[i])
+        {
+            fprintf(stderr, "Error: Memory Allocation.\n");
+            retval = 1;
+            goto cleanup;
+        }
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        if (!(Bparts[i] = allocate_mat_f(k4, n4 << 2)))
+        {
+            fprintf(stderr, "Error: Memory Allocation.\n");
+            retval = 1;
+            goto cleanup;
+        }
+    }
+    fill_mat_f(Atemp, M, K, 1, RANDOM);
+    fill_mat_f(Btemp, K, N, 1, RANDOM);
+
+    divideMatrix(Atemp, Aparts, M, K, 8);
+    divideMatrix(Btemp, Bparts, K, N, 4);
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print input data
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("Input Matrix A: ", "%lf ", Atemp, M, K);
+        print_mat_f("Input Matrix B: ", "%lf ", Btemp, K, N);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f("Input Matrix A: ", "%3.2lf ", Atemp, 1, K);
+        print_mat_f("Input Matrix B: ", "%3.2lf ", Btemp, 1, N);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Brook code block
+	/////////////////////////////////////////////////////////////////////////
+    {
+        float4 streamA1<m4, k4>;
+        float4 streamA2<m4, k4>;
+        float4 streamA3<m4, k4>;
+        float4 streamA4<m4, k4>;
+
+        float4 streamA5<m4, k4>;
+        float4 streamA6<m4, k4>;
+        float4 streamA7<m4, k4>;
+        float4 streamA8<m4, k4>;
+
+        float4 streamB1<k4, n4>;
+        float4 streamB2<k4, n4>;
+        float4 streamB3<k4, n4>;
+        float4 streamB4<k4, n4>;
+
+        float4 streamC1<m4, n4>;
+        float4 streamC2<m4, n4>;
+        float4 streamC3<m4, n4>;
+        float4 streamC4<m4, n4>;
+
+        float4 streamC5<m4, n4>;
+        float4 streamC6<m4, n4>;
+        float4 streamC7<m4, n4>;
+        float4 streamC8<m4, n4>;
+
+        // Record GPU Total time
+        Start(0);
+        for(i = 0; i < cmd.Iterations; i++)
+        {
+			// Copying A
+			streamRead(streamA1, Aparts[0]);
+			streamRead(streamA2, Aparts[1]);
+			streamRead(streamA3, Aparts[2]);
+			streamRead(streamA4, Aparts[3]);
+			streamRead(streamA5, Aparts[4]);
+			streamRead(streamA6, Aparts[5]);
+			streamRead(streamA7, Aparts[6]);
+			streamRead(streamA8, Aparts[7]);
+
+			// Copying B
+			streamRead(streamB1, Bparts[0]);
+			streamRead(streamB2, Bparts[1]);
+			streamRead(streamB3, Bparts[2]);
+			streamRead(streamB4, Bparts[3]);	
+
+			// Running matmatmult
+			if( M / 8 != 0 && N / 4 != 0 && K / 4 != 0 )
+			{
+					optimized_matmult(k4, streamA1, streamA2, streamA3, streamA4, streamA5, streamA6, streamA7, streamA8,
+							streamB1, streamB2, streamB3, streamB4,
+							streamC1, streamC2, streamC3, streamC4, streamC5, streamC6, streamC7, streamC8);
+			}
+			else
+			{
+				printf("8 MRT not possible for M = %d, N = %d, K = %d, ", M, N, K);
+			}
+
+			// Copying data back to HOST memory
+			streamWrite(streamC1, Cparts[0]);
+			streamWrite(streamC2, Cparts[1]);
+			streamWrite(streamC3, Cparts[2]);
+			streamWrite(streamC4, Cparts[3]);
+			streamWrite(streamC5, Cparts[4]);
+			streamWrite(streamC6, Cparts[5]);
+			streamWrite(streamC7, Cparts[6]);
+			streamWrite(streamC8, Cparts[7]);
+        }
+        Stop(0);
+    }
+
+    combineMatrix(Cparts, Ctemp, N, M, 8);
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Print results if requested
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("Output Matrix: ", "%lf ", Ctemp, M, N);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f("Output Matrix: ", "%3.2lf ", Ctemp, 1, N);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+        double gflop = (double)(2.0 * M * K * N * (double)cmd.Iterations)/(double)(1024 * 1024 * 1024);
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time", "Gflops");
+		printf( "%-8d%-8d%-16d%-16lf%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time, gflop/time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        int res = 0, i, j;
+        float *CPU;
+        if (CPU = (float*)malloc(sizeof *CPU * M * N))
+        {
+			printf("-e Verify correct output.\n");
+			printf("Performing Matrix Multiplication on CPU ... ");
+
+            matmultCPU(Atemp, Btemp, CPU, M, K, N);
+            for (i = 0; i < M; i++)
+            {
+                for (j = 0; j < N; j++)
+                {
+                    if (floatCmp(Ctemp[i * N + j], CPU[i * N + j]) != 0)
+                    {
+                        res++;
+                    }
+                }
+            }
+			printf("Done\n");
+
+            if (res)
+            {
+                printf("%s: Failed!\n\n", argv[0]);
+                retval = -1;
+            }
+            else
+            {
+                printf("%s: Passed!\n\n", argv[0]);
+                retval = 0;
+            }
+            free(CPU);
+        }
+        else
+        {
+            fprintf(stderr, "Error: Allocation failed!\n");
+            retval = -1;
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Compare performance with CPU if requested
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Performance)
+    {
+        unsigned int i;
+        float *CPU;
+		double cpu_time = 0.0;
+		double gpu_time = 0.0;
+        double gflop = (double)(2.0 * M * K * N * (double)cmd.Iterations)/(double)(1024 * 1024 * 1024);
+
+        if (CPU = (float*)malloc(sizeof *CPU * M * N))
+        {
+			printf("-p Compare performance with CPU.\n");
+
+			// Record CPU Total time
+			Start(1);
+			for(i = 0; i < cmd.Iterations; i ++)
+			{
+				matmultCPU(Atemp, Btemp, CPU, M, K, N);	
+			}
+			Stop(1);
+
+			// Print CPU timing and speedup
+			cpu_time = GetElapsedTime(1);
+			gpu_time = GetElapsedTime(0);
+			printf(	"%-8s%-8s%-16s%-16s%-16s%-16s%-16s\n","Width","Height","Iterations",
+					"CPU Total Time","GPU Total Time","Gflops","Speedup");
+			printf(	"%-8d%-8d%-16d%-16lf%-16lf%-16lf%-16lf", cmd.Width, cmd.Height, 
+					cmd.Iterations, cpu_time, gpu_time, gflop/gpu_time, cpu_time/gpu_time);
+			printf("\n\n");
+            free(CPU);
+        }
+        else
+        {
+            fprintf(stderr, "Error: Allocation failed!\n");
+            retval = -1;
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+   	/////////////////////////////////////////////////////////////////////////
+cleanup:
+    if (Atemp)
+    {
+        free(Atemp);
+    }
+    if (Btemp)
+    {
+        free(Btemp);
+    }
+    if (Ctemp)
+    {
+        free(Ctemp);
+    }
+
+    for(i = 0; i < 8; i++)
+    {
+        if (Aparts[i])
+        {
+            free(Aparts[i]);
+        }
+        if (Cparts[i])
+        {
+            free(Cparts[i]);
+        }
+    }
+    for(i = 0; i < 4; i++)
+    {
+        if (Bparts[i])
+        {
+            free(Bparts[i]);
+        }
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+	return(retval);
+}

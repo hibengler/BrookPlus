@@ -1,0 +1,466 @@
+/****************************************************************************
+
+Copyright (c) 2008, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+****************************************************************************/
+
+/**
+ * \file    MonteCarlo.br
+ * \brief   Implementation of Monte Carlo simulation for Asian Option Price
+ *          calculation
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+
+/**
+ * \brief   calculates the  price and vega for all trajectories
+ */
+kernel 
+void calOutputs(float4 strikePricef4,
+                float4 meanDeriv1<>, float4  meanDeriv2<>, 
+                float4 meanPrice1<>, float4 meanPrice2<>,
+                out float4 pathDeriv1<>, out float4 pathDeriv2<>, 
+                out float4 priceVec1<>, out float4 priceVec2<>)
+{
+    float4 temp1 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 temp2 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 temp3 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 temp4 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    
+    float4 tempDiff1 = meanPrice1 - strikePricef4;
+    float4 tempDiff2 = meanPrice2 - strikePricef4;
+    if(tempDiff1.x > 0.0f)
+    {
+        temp1.x = 1.0f;
+        temp3.x = tempDiff1.x;
+    }
+    if(tempDiff1.y > 0.0f)
+    {
+        temp1.y = 1.0f;
+        temp3.y = tempDiff1.y ;
+    }
+    if(tempDiff1.z > 0.0f)
+    {
+        temp1.z = 1.0f;
+        temp3.z = tempDiff1.z;
+    }
+    if(tempDiff1.w > 0.0f)
+    {
+        temp1.w = 1.0f;
+        temp3.w = tempDiff1.w;
+    }
+
+    if(tempDiff2.x > 0.0f)
+    {
+        temp2.x = 1.0f;
+        temp4.x = tempDiff2.x;
+    }
+    if(tempDiff2.y > 0.0f)
+    {
+        temp2.y = 1.0f;
+        temp4.y = tempDiff2.y;
+    }
+    if(tempDiff2.z > 0.0f)
+    {
+        temp2.z = 1.0f;
+        temp4.z = tempDiff2.z;
+    }
+    if(tempDiff2.w > 0.0f)
+    {
+        temp2.w = 1.0f;
+        temp4.w = tempDiff2.w;
+    }
+
+    pathDeriv1 = meanDeriv1 * temp1;
+    pathDeriv2 = meanDeriv2 * temp2;
+    priceVec1 = temp3;
+    priceVec2 = temp4;
+}
+
+
+/*
+ *@brief Left shift
+ */
+kernel unsigned int4 
+lshift128(unsigned int4 input, unsigned int shift)
+{
+    unsigned int invshift = 32u - shift;
+
+    unsigned int4 output;
+
+    output.x = input.x << shift;
+    output.y = (input.y << shift) | (input.x >> invshift);
+    output.z = (input.z << shift) | (input.y >> invshift);
+    output.w = (input.w << shift) | (input.z >> invshift);
+
+    return output;
+}
+
+/*
+ *@brief Right shift
+ */
+kernel unsigned int4
+rshift128(unsigned int4 input, unsigned int shift)
+{
+    unsigned int invshift = 32u - shift;
+
+    unsigned int4 output;
+
+    output.w = input.w >> shift;
+    output.z = (input.z >> shift) | (input.w << invshift);
+    output.y = (input.y >> shift) | (input.z << invshift);
+    output.x = (input.x >> shift) | (input.y << invshift);
+
+    return output;
+}
+
+/*
+ *@brief The gpu kernel which is responsible for initializing the state
+ *        array and then generation of random numbers from the state array.
+ *
+ *        Here one seed generates 8 random numbers.
+ *
+ *        It is prefered to have 2-D streams for input / output to avoid AT.
+ */
+kernel void 
+generateRand(unsigned int4 seedIn<>, out unsigned int4 A1<>, out unsigned int4 A2<>,
+                                      out unsigned int4 A3<>)
+{
+    unsigned int4 state1 = seedIn;
+    unsigned int4 state2; 
+    unsigned int4 state3; 
+    unsigned int4 state4; 
+    unsigned int4 state5;
+
+    unsigned int4 mask4;
+    unsigned int4 thirty4; 
+    unsigned int4 one4;
+    unsigned int4 two4;
+    unsigned int4 three4;
+    unsigned int4 four4;
+
+    unsigned int4 r1;
+    unsigned int4 r2;
+
+    unsigned int4 a;
+    unsigned int4 b; 
+
+    unsigned int4 e; 
+    unsigned int4 f; 
+    
+    unsigned int thirteen  = 13u;
+    unsigned int fifteen = 15u;
+    unsigned int shift = 8u * 3u;
+    unsigned int zero = 0u;
+    unsigned int one = 1u;
+    unsigned int two = 2u;
+    unsigned int three = 3u;
+    unsigned int four = 4u;
+    unsigned int thirty = 30u;
+
+    unsigned int stateMask = 1812433253u;
+    unsigned int mask11 = 0xfdff37ffu;
+    unsigned int mask12 = 0xef7f3f7du;
+    unsigned int mask13 = 0xff777b7du;
+    unsigned int mask14 = 0x7ff7fb2fu;
+    
+    // Since there is no unsigned int constructor available in AMDHLSL,
+    // The states are initialized with zero in the following manner.
+    state2.x = zero;
+    state2.y = zero;
+    state2.z = zero;
+    state2.w = zero;
+
+    state3.x = zero;
+    state3.y = zero;
+    state3.z = zero;
+    state3.w = zero;
+
+    state4.x = zero;
+    state4.y = zero;
+    state4.z = zero;
+    state4.w = zero;
+
+    state5.x = zero;
+    state5.y = zero;
+    state5.z = zero;
+    state5.w = zero;
+
+    mask4.x = stateMask;
+    mask4.y = stateMask;
+    mask4.z = stateMask;
+    mask4.w = stateMask;
+
+    thirty4.x = thirty;
+    thirty4.y = thirty;
+    thirty4.z = thirty;
+    thirty4.w = thirty;
+
+    one4.x = one;
+    one4.y = one;
+    one4.z = one;
+    one4.w = one;
+
+    two4.x = two;
+    two4.y = two;
+    two4.z = two;
+    two4.w = two;
+
+    three4.x = three;
+    three4.y = three;
+    three4.z = three;
+    three4.w = three;
+
+    four4.x = four;
+    four4.y = four;
+    four4.z = four;
+    four4.w = four;
+
+    //Initializing states.
+    state2 = mask4 * (state1 ^ (state1 >> thirty4)) + one4;
+    state3 = mask4 * (state2 ^ (state2 >> thirty4)) + two4;
+    state4 = mask4 * (state3 ^ (state3 >> thirty4)) + three4;
+    state5 = mask4 * (state4 ^ (state4 >> thirty4)) + four4;
+
+    r1 = state4;
+    r2 = state5;
+    
+    a = state1;
+    b = state3;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A1.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A1.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A1.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A1.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A1;
+    
+    a = state2;
+    b = state4;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A2.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A2.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A2.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A2.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A2;
+
+    a = state3;
+    b = state5;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A3.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A3.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A3.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A3.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+}
+
+/*
+ *@brief Apply box mullar transformation on the generated float MT random numbers to 
+ *        convert them to Gaussian Random numbers.
+ *
+ */
+kernel void boxMullar(unsigned int4 streamIn1<>, unsigned int4 streamIn2<>,
+                      out float4 streamOut1<>, out float4 streamOut2<>)
+{
+    float4 one4 = float4(1.0f, 1.0f, 1.0f, 1.0f);
+    float4 intMax = float4(4294967296.0f, 4294967296.0f, 4294967296.0f, 4294967296.0f);
+
+    float4 PI = float4(3.14159265358979f, 3.14159265358979f, 3.14159265358979f, 3.14159265358979f);
+    float4 two = float4(2.0f, 2.0f, 2.0f, 2.0f);
+    float4 r; 
+    float4 phi;
+    
+    float4 tempFloat1 = (float4)streamIn1 * one4 / intMax;
+    float4 tempFloat2 = (float4)streamIn2 * one4 / intMax;
+
+    // Applying Box Mullar Transformations.
+    r = sqrt((-two) * log(tempFloat1));
+    phi  = two * PI * tempFloat2;
+    streamOut1 = r * cos(phi);
+    streamOut2 = r * sin(phi);
+}
+
+/**
+ * \brief   calculates the trajectory price and sum price for all trajectories
+ */
+kernel 
+void calTrajSumPrice(float4 C1f4, float4 C2f4, float4 finalRand1<>, float4 finalRand2<>, 
+                        float4 trajPricein1<>, float4 trajPricein2<>, float4 sumPricein1<>, float4 sumPricein2<>,
+                        out float4 trajPrice1<>, out float4 trajPrice2<>, out float4 sumPrice1<>, out float4 sumPrice2<>)
+{
+    float4 tempOnef4 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 tempTwof4 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    tempOnef4 = trajPricein1 * exp(C1f4 + C2f4 * finalRand1);
+    tempTwof4 = trajPricein2 * exp(C1f4 + C2f4 * finalRand2);
+    
+    trajPrice1 = tempOnef4;
+    trajPrice2 = tempTwof4;
+    sumPrice1 = sumPricein1 + tempOnef4;
+    sumPrice2 = sumPricein2 + tempTwof4;
+}
+
+/**
+ * \brief   calculates the derivative price for all trajectories
+ */
+kernel 
+void calSumDeriv(float4 c3timeStepif4, float4 sigmaf4, float4 initPricef4, 
+                        float4 trajPrice1<>, float4 trajPrice2<>,float4 sumDerivin1<>, float4 sumDerivin2<>,
+                        out float4 sumDeriv1<>, out float4 sumDeriv2<>)
+{
+    sumDeriv1 = sumDerivin1 + trajPrice1 * ((log(trajPrice1/ initPricef4) - c3timeStepif4) / sigmaf4);
+    sumDeriv2 = sumDerivin2 + trajPrice2 * ((log(trajPrice2/ initPricef4) - c3timeStepif4) / sigmaf4);
+}
+
+/**
+ * \brief   divides with constant value
+ */
+kernel 
+void vectorDivConst4mrt(float value, 
+                        float4 in11<>, float4 in12<>, float4 in21<>, float4 in22<>, 
+                        out float4 out11<>, out float4 out12<>, out float4 out21<>, out float4 out22<>)
+{
+    float4 value4 = float4(value, value, value, value);
+    out11 = in11 / value4;
+    out12 = in12 / value4;
+    out21 = in21 / value4;
+    out22 = in22 / value4;
+}
+
+/**
+ * \brief   averages the option prrice from all trajectories
+ */
+reduce 
+void sum2dStreams( float4 stream<>, reduce float4 value <>) 
+{
+    value = value + stream;
+}
+
+/**
+ * \brief   calculates the  price and vega for all trajectories for given random numbers
+ */
+kernel 
+void calPriceVegaVec(float noOfSum, float4 strikePricef4, float4 C1f4, float4 C2f4, float4 C3f4, float4 initPricef4, 
+                    float4 sigmaf4, float4 timeStepf4, uint4 randStream<>, 
+                    out float4 priceVec1<>, out float4 priceVec2<>,
+                    out float4 pathDeriv1<>, out float4 pathDeriv2<>) 
+{
+        
+        float4 tempf4 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        uint4 tempui4 = uint4(0u, 0u, 0u, 0u);
+        
+        float4 tempPrice1 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        float4 tempPrice2 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        float4 tempPathDeriv1 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        float4 tempPathDeriv2 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        
+        float4 trajPrice1 = initPricef4;
+        float4 trajPrice2 = initPricef4;
+        
+        float4 sumPrice1 = initPricef4;
+        float4 sumPrice2 = initPricef4;
+        
+        float4 meanPrice1 = tempf4;
+        float4 meanPrice2 = tempf4;
+        
+        float4 sumDeriv1 = tempf4;
+        float4 sumDeriv2 = tempf4;
+        
+        float4 meanDeriv1 = tempf4;
+        float4 meanDeriv2 = tempf4;
+        
+        uint4 finalRand1 = tempui4;
+        uint4 finalRand2 = tempui4;
+        
+        float4 finalRandf1 = tempf4;
+        float4 finalRandf2 = tempf4;
+        
+        uint4 nextRandStream = randStream;
+
+        float i = 1.0f;
+        //Run the Monte Carlo simulation a total of Num_Sum-1 times
+        while(i < noOfSum)
+        {
+            uint4 tempRandStream = nextRandStream;
+
+            float4 tempTrajPrice1 = trajPrice1;
+            float4 tempTrajPrice2 = trajPrice2;
+
+            float4 tempSumPrice1 = sumPrice1;
+            float4 tempSumPrice2 = sumPrice2;
+
+            float4 tempSumDeriv1 = sumDeriv1;
+            float4 tempSumDeriv2 = sumDeriv2;
+            
+            float4 i4 = float4(i, i, i, i);
+
+            generateRand(tempRandStream, finalRand1, finalRand2, nextRandStream);
+            boxMullar(finalRand1, finalRand2, finalRandf1, finalRandf2);
+
+
+            calTrajSumPrice(C1f4, C2f4, finalRandf1, finalRandf2, 
+                        tempTrajPrice1, tempTrajPrice2, tempSumPrice1, tempSumPrice2,
+                        trajPrice1, trajPrice2, sumPrice1, sumPrice2);
+
+            tempTrajPrice1 = trajPrice1;
+            tempTrajPrice2 = trajPrice2;
+
+            tempf4 = C3f4 * timeStepf4 * i4;
+            calSumDeriv(tempf4, sigmaf4, initPricef4, 
+                        tempTrajPrice1, tempTrajPrice2,    tempSumDeriv1, tempSumDeriv2,
+                        sumDeriv1, sumDeriv2);
+                        
+            i += 1.0f;
+        }
+        //Calculate the average price and “average derivative” of each simulated path
+        
+        vectorDivConst4mrt(noOfSum, sumPrice1, sumPrice2, sumDeriv1, sumDeriv2,
+                           meanPrice1, meanPrice2, meanDeriv1, meanDeriv2); 
+
+        calOutputs(strikePricef4, meanDeriv1, meanDeriv2, meanPrice1, meanPrice2, 
+                    tempPathDeriv1, tempPathDeriv2, tempPrice1, tempPrice2);
+                    
+        priceVec1 = tempPrice1;
+        priceVec2 = tempPrice2;
+        pathDeriv1 = tempPathDeriv1; 
+        pathDeriv2 = tempPathDeriv2;
+}

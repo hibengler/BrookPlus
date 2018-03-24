@@ -1,0 +1,297 @@
+/****************************************************************************
+
+Copyright (c) 2008, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+****************************************************************************/
+/*****************************************************************************
+  \file MersenneTwister.br
+  \brief A pseudo random number generation method.
+   
+   The commonly used variant of Mersenne Twister, MT19937 is implemented.
+   Algorithm and pseudocode: http://en.wikipedia.org/wiki/Mersenne_twister
+
+   The GPU implementation is SFMT implementation. The algorithm sfmt implementation
+   could be found at :http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/SFMT/index.html
+ 
+ ****************************************************************************/
+
+/*
+ *@brief Left shift
+ */
+kernel unsigned int4 
+lshift128(unsigned int4 input, unsigned int shift)
+{
+    unsigned int invshift = 32U - shift;
+
+    unsigned int4 output;
+
+    output.x = input.x << shift;
+    output.y = (input.y << shift) | (input.x >> invshift);
+    output.z = (input.z << shift) | (input.y >> invshift);
+    output.w = (input.w << shift) | (input.z >> invshift);
+
+    return output;
+}
+
+/*
+ *@brief Right shift
+ */
+kernel unsigned int4
+rshift128(unsigned int4 input, unsigned int shift)
+{
+    unsigned int invshift = 32U - shift;
+
+    unsigned int4 output;
+
+    output.w = input.w >> shift;
+    output.z = (input.z >> shift) | (input.w << invshift);
+    output.y = (input.y >> shift) | (input.z << invshift);
+    output.x = (input.x >> shift) | (input.y << invshift);
+
+    return output;
+}
+
+/*
+ *@brief The gpu kernel which is responsible for initializing the state
+ *        array and then generation of random numbers from the state array.
+ *
+ *        Here one seed generates 8 random numbers.
+ *
+ *        It is prefered to have 2-D streams for input / output to avoid AT.
+ */
+kernel void 
+generateNumber_gpu(unsigned int4 seedIn<>, out unsigned int4 A1<>, out unsigned int4 A2<>,
+                                      out unsigned int4 A3<>, out unsigned int4 A4<>,
+                                      out unsigned int4 A5<>, out unsigned int4 A6<>,
+                                      out unsigned int4 A7<>, out unsigned int4 A8<>)
+{
+    unsigned int4 state1 = seedIn;
+    unsigned int4 state2 = uint4(0U, 0U, 0U, 0U); 
+    unsigned int4 state3 = uint4(0U, 0U, 0U, 0U); 
+    unsigned int4 state4 = uint4(0U, 0U, 0U, 0U); 
+    unsigned int4 state5 = uint4(0U, 0U, 0U, 0U);
+
+    unsigned int4 mask4 = uint4(1812433253U, 1812433253U, 1812433253U, 1812433253U);
+    unsigned int4 thirty4 = uint4(30U, 30U, 30U, 30U); 
+    unsigned int4 one4 = uint4(1U, 1U, 1U, 1U);
+    unsigned int4 two4 = uint4(2U, 2U, 2U, 2U);
+    unsigned int4 three4 = uint4(3U, 3U, 3U, 3U);
+    unsigned int4 four4 = uint4(4U, 4U, 4U, 4U);
+
+    unsigned int4 r1;
+    unsigned int4 r2;
+
+    unsigned int4 a;
+    unsigned int4 b; 
+
+    unsigned int4 e; 
+    unsigned int4 f; 
+    
+    unsigned int thirteen  = 13U;
+    unsigned int fifteen = 15U;
+    unsigned int shift = 8U * 3U;
+    
+    unsigned int mask11 = 0xfdff37ffU;
+    unsigned int mask12 = 0xef7f3f7dU;
+    unsigned int mask13 = 0xff777b7dU;
+    unsigned int mask14 = 0x7ff7fb2fU;
+ 
+    //Initializing states.
+    state2 = mask4 * (state1 ^ (state1 >> thirty4)) + one4;
+    state3 = mask4 * (state2 ^ (state2 >> thirty4)) + two4;
+    state4 = mask4 * (state3 ^ (state3 >> thirty4)) + three4;
+    state5 = mask4 * (state4 ^ (state4 >> thirty4)) + four4;
+
+    r1 = state4;
+    r2 = state5;
+    
+    a = state1;
+    b = state3;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A1.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A1.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A1.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A1.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A1;
+    
+    a = state2;
+    b = state4;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A2.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A2.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A2.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A2.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A2;
+
+    a = state3;
+    b = state5;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A3.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A3.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A3.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A3.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A3;
+
+    a = state4;
+    b = state1;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A4.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A4.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A4.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A4.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    
+    r1 = r2;
+    r2 = A4;
+
+    a = state5;
+    b = state2;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A5.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A5.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A5.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A5.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A5;
+    
+    a = A1;
+    b = A3;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A6.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A6.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A6.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A6.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A6;
+
+    a = A2;
+    b = A4;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A7.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A7.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A7.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A7.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+
+    r1 = r2;
+    r2 = A7;
+
+    a = A3;
+    b = A5;
+    
+    e = lshift128(a, shift);
+    f = rshift128(r1, shift);
+
+    A8.x = a.x ^ e.x ^ ((b.x >> thirteen) & mask11) ^ f.x ^ (r2.x << fifteen);
+    A8.y = a.y ^ e.y ^ ((b.y >> thirteen) & mask12) ^ f.y ^ (r2.y << fifteen);
+    A8.z = a.z ^ e.z ^ ((b.z >> thirteen) & mask13) ^ f.z ^ (r2.z << fifteen);
+    A8.w = a.w ^ e.w ^ ((b.w >> thirteen) & mask14) ^ f.w ^ (r2.w << fifteen);
+}
+
+/*
+ *@brief Apply box mullar transformation on the generated float MT random numbers to 
+ *        convert them to Gaussian Random numbers.
+ *
+ */
+kernel void boxMullar_gpu(unsigned int4 streamIn1<>, unsigned int4 streamIn2<>,
+                      unsigned int4 streamIn3<>, unsigned int4 streamIn4<>,
+                      unsigned int4 streamIn5<>, unsigned int4 streamIn6<>,
+                      unsigned int4 streamIn7<>, unsigned int4 streamIn8<>,
+                      out float4 streamOut1<>, out float4 streamOut2<>,
+                      out float4 streamOut3<>, out float4 streamOut4<>,
+                      out float4 streamOut5<>, out float4 streamOut6<>,
+                      out float4 streamOut7<>, out float4 streamOut8<>)
+{
+    float4 one4 = float4(1.0f, 1.0f, 1.0f, 1.0f);
+    float4 intMax = float4(4294967296.0f, 4294967296.0f, 4294967296.0f, 4294967296.0f);
+
+    float4 PI = float4(3.14159265358979f, 3.14159265358979f, 3.14159265358979f, 3.14159265358979f);
+    float4 two = float4(2.0f, 2.0f, 2.0f, 2.0f);
+    float4 r; 
+    float4 phi;
+    
+    float4 tempFloat1 = (float4)streamIn1 * one4 / intMax;
+    float4 tempFloat2 = (float4)streamIn2 * one4 / intMax;
+    float4 tempFloat3 = (float4)streamIn3 * one4 / intMax;
+    float4 tempFloat4 = (float4)streamIn4 * one4 / intMax;
+    float4 tempFloat5 = (float4)streamIn5 * one4 / intMax;
+    float4 tempFloat6 = (float4)streamIn6 * one4 / intMax;
+    float4 tempFloat7 = (float4)streamIn7 * one4 / intMax;
+    float4 tempFloat8 = (float4)streamIn8 * one4 / intMax;
+
+    // Applying Box Mullar Transformations.
+    r = sqrt((-two) * log(tempFloat1));
+    phi  = two * PI * tempFloat2;
+    streamOut1 = r * cos(phi);
+    streamOut2 = r * sin(phi);
+    
+    r = sqrt((-two) * log(tempFloat3));
+    phi = two * PI * tempFloat4;
+    streamOut3 = r * cos(phi);
+    streamOut4 = r * sin(phi);
+
+    r = sqrt((-two) * log(tempFloat5));
+    phi = two * PI * tempFloat6;
+    streamOut5 = r * cos(phi);
+    streamOut6 = r * sin(phi);
+
+    r = sqrt((-two) * log(tempFloat7));
+    phi = two * PI * tempFloat8;
+    streamOut7 = r * cos(phi);
+    streamOut8 = r * sin(phi);
+}

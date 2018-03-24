@@ -1,0 +1,75 @@
+-------------------------------------------------------------------------------
+  				        BROOK+
+			 GPU-Accelerated Out-of-Core Matrix multiplication
+-------------------------------------------------------------------------------
+
+Introduction
+------------
+This application provides Out-of-core matrix multiplication( for signed int, 
+unsigned int, float and double data types) implementation on 
+BROOK+ with CAL (Compute Abstraction Layer) as backend. 
+
+Out-of-core Matrix multiplication 
+---------------------------------
+If matrices does not fit on the gpu local memory, break the matrices and calculate final result. Divide input matrix A and B as they fit into GPU's local 
+memory and perform multiplication to get the corresponding C sub matrix. Finally all C sub matrices are merged together to get the final result matrix, C. 
+
+Software Pre-requisites
+-----------------------
+
+1) AMD CAL SDK
+2) BROOK+ SDK
+
+Compilation
+-----------
+
+1) Set environment variables:-
+
+    i.e. while building, the PATH environment variable would look like:-
+	PATH=<some-directories-set-by-system>;%BROOKROOT%
+	PATH=<some-directories-set-by-system>;%CALROOT%
+
+2) The binaries will be created in the following manner:-
+
+   Win32/debug      : samples\bin\xp_x86_32\out_of_core_matmult_d.exe
+   Win32/release    : samples\bin\xp_x86_32\out_of_core_matmult.exe
+
+Source Description
+------------------
+Here's a brief decription of the contents of the various source files in OutOfCoreMM.
+
+out_of_core_matmult.h	  - Contains the class definition with the relevant functions  
+                        for matrix multiplication
+Main.cpp	  - Contains all menu handling and invokation of matrix multiplication functions.
+
+Timer.cpp    - Used to time the execution 
+
+Execution
+---------
+
+The compilation creates out_of_core_matmult.exe 
+
+Usage: out_of_core_matmult.exe <options>
+Options:-
+     -h          This help information
+     -all        Flag to run for all matrix dimensions
+                 ( -int or -float or -double options also required for this )
+     -e          Flag to verify results
+     -t          Flag to print timing information
+     -float      Flag to run for float data type.
+     -int        Flag to run for int data type.
+     -double     Flag to run for double data type.
+	
+Examples,
+
+    a) For running matrix multiplication, 
+    $out_of_core_matmult.exe -float -all
+
+    b) For verifying output,
+    $out_of_core_matmult.exe -float -e 8192 4096 8192
+    
+    c) For the input where M, K, N are same,
+	$out_of_core_matmult.exe -float 8192
+
+    d) For the integer matrix matrix multiplication,
+	$out_of_core_matmult.exe -int 8192

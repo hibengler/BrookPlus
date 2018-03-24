@@ -1,0 +1,340 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file constant.br
+  \brief Brook test to handle constant arguments
+
+  This program handles the testing of constant arguments in a brook kernel.
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+static int retval = 0;
+
+/**
+  \param a float constant
+  \param s output stream
+  \brief copies a static constant to the output stream
+  */
+kernel void constant1(float a, out float4 s<>)
+{
+    s = float4(a, 1.0f, 0.f, 0.f);
+}
+
+/**
+  \param b float2 constant
+  \param s output stream
+  \brief copies a static constant to the output stream
+  */
+kernel void constant2(float2 b, out float4 s<>)
+{
+    s = float4(b.x, b.y, 0.f, 0.f);
+}
+
+/**
+  \param c float3 constant
+  \param s output stream
+  \brief copies a static constant to the output stream
+  */
+kernel void constant3(float3 c, out float4 s<>)
+{
+    s = float4(c.x, c.y, c.z, 0.f);
+}
+
+/**
+  \param d float4 constant
+  \param s output stream
+  \brief copies a static constant to the output stream
+  */
+kernel void constant4(float4 d, out float4 s<>)
+{
+    s = float4(d.x, d.y, d.z, d.w);
+}
+
+/**
+  \param n constant number to copy
+  \param a float constant
+  \param b float2 constant
+  \param c float3 constant
+  \param d float4 constant
+  \param s output stream
+  \brief copies a constant to the output stream based on the input value \i n
+  */
+kernel void constantN(float n, float a, float2 b, float3 c, float4 d, out float4 s<>)
+{
+    // written this way to avoid using n == 1.00000f
+    if (n < 1.5f)	//n=1 case
+    {
+        s = float4(a, n, 0.f, 0.f);
+    }
+    else if (n < 2.5f)	//n=2 case
+    {
+        s = float4(b.x, b.y, 0.f, 0.f);
+    }
+    else if (n < 3.5f)	//n=3 case
+    {
+        s = float4(c.x, c.y, c.z, 0.f);
+    }
+    else if (n < 4.5f)	//n=4 case
+    {
+        s = float4(d.x, d.y, d.z, d.w);
+    }
+    else	//invalid input
+    {
+        s = float4(0.f, 0.0f, 0.0f, 0.0f);
+    }
+}
+
+/**
+ *
+ * \brief	Copies a constant to the output 
+ *			matrix based on the input value \i n	
+ *
+ * \param n Constant number to copy
+ * \param a float constant
+ * \param b float2 constant
+ * \param c float3 constant
+ * \param d float4 constant
+ * \param s Output matrix
+ *  
+*/
+void constant_cpu(float n, float a, float2 b, float3 c, float4 d, float4 *s, int Length)
+{
+    int i;
+    for (i = 0; i < Length; ++i)
+    {
+        // written this way to avoid using n == 1.00000f
+        if (n < 1.5f)	//n=1 case
+        {
+            s[i] = float4(a, n, 0.f, 0.f);
+        }
+        else if (n < 2.5f)	//n=2 case
+        {
+            s[i] = float4(b.x, b.y, 0.f, 0.f);
+        }
+        else if (n < 3.5f)	//n=3 case
+        {
+            s[i] = float4(c.x, c.y, c.z, 0.f);
+        }
+        else if (n < 4.5f)	//n=4 case
+        {
+            s[i] = d;
+        }
+        else		//invalid input
+        {
+            s[i] = float4(0.f, 0.0f, 0.0f, 0.0f);
+        }
+    }
+}
+
+
+int main(int argc, char** argv)
+{
+    float4 *data[8] = {NULL};
+    float4 d = float4(5.1f, 1.5f, 4.2f, 2.4f);
+    float3 c = float3(0.1f, 0.2f, 0.3f);
+    float2 b = float2(67.89f, 98.76f);
+    float  a = 12.34f;
+    unsigned int Length;
+    struct infoRec cmd;
+    unsigned int i;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+    Length = cmd.Height * cmd.Width;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Allocate memory
+   	/////////////////////////////////////////////////////////////////////////
+    for (i = 0; i < 8; ++i)
+    {
+        if (!(data[i] = allocate_mat_f4(cmd.Height, cmd.Width)))
+        {
+            retval = -1;
+            goto cleanup;
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+    // Brook code block
+   	/////////////////////////////////////////////////////////////////////////
+    {
+        float4 s1<Length>;
+        float4 s2<Length>;
+        float4 s3<Length>;
+        float4 s4<Length>;
+        float4 s5<Length>;
+        float4 s6<Length>;
+        float4 s7<Length>;
+        float4 s8<Length>;
+
+		// Record GPU Total time
+		Start(0);
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+	        // Run the brook program 
+			constant1(a, s1);
+			constant2(b, s2);
+			constant3(c, s3);
+			constant4(d, s4);
+			constantN(1.0f, a, b, c, d, s5);
+			constantN(2.0f, a, b, c, d, s6);
+			constantN(3.0f, a, b, c, d, s7);
+			constantN(4.0f, a, b, c, d, s8);
+
+			// Write data back from stream 
+			streamWrite(s1, data[0]);
+			streamWrite(s2, data[1]);
+			streamWrite(s3, data[2]);
+			streamWrite(s4, data[3]);
+			streamWrite(s5, data[4]);
+			streamWrite(s6, data[5]);
+			streamWrite(s7, data[6]);
+			streamWrite(s8, data[7]);
+		}
+        Stop(0);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+    // Print results if requested 
+   	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        for(i = 0; i < 8; ++i)
+        {
+            if (i < 4)
+            {
+                print_mat_f4("Static Kernel Output: ", "%4.2lf ", data[i], 1, Length);
+            }
+            else
+            {
+                print_mat_f4("Dynamic Kernel Output: ", "%4.2lf ", data[i], 1, Length);
+            }
+        }
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        for(i = 0; i < 8; ++i)
+        {
+            if (i < 4)
+            {
+                print_mat_f4("Static Kernel Output: ", "%4.2lf ", data[i], 1, 10);
+            }
+            else
+            {
+                print_mat_f4("Dynamic Kernel Output: ", "%4.2lf ", data[i], 1, 10);
+            }
+        }
+    }
+	
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time");
+		printf( "%-8d%-8d%-16d%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        float4 *output;
+        int res = 0;
+        if (!(output = allocate_mat_f4(cmd.Height, cmd.Width)))
+        {
+            retval = -1;
+            goto cleanup;
+        }
+
+		printf("-e Verify correct output.\n");
+
+        for (i = 0; i < 8; ++i)
+        {
+            int j = (i % 4) + 1;
+            constant_cpu((float)j, a, b, c, d, output, Length);
+            res += compare_mat_f4(output, data[i], 1, Length);
+        }
+        if (res)
+        {
+            printf("%s: Failed!\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+            retval = 0;
+        }
+        if (output)
+        {
+            free(output);
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+	/////////////////////////////////////////////////////////////////////////
+cleanup:
+    for (i = 0; i < 8; ++i)
+    {
+        if (data[i])
+        {
+            free(data[i]);
+        }
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+    return retval;
+}

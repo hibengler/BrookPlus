@@ -1,0 +1,32 @@
+EXPORTS
+    calutAMDhlslCompileProgram
+    calutAMDhlslGetLastError
+    amuABIMultiBinaryCreate
+    amuABIMultiBinaryDestroy
+    amuABIMultiBinaryAddEncoding
+    amuABIMultiBinaryAddSubConstantBuffers
+    amuABIMultiBinaryAddAMUEncoding
+    amuABIMultiBinaryGetEncodingCount
+    amuABIMultiBinaryGetEncoding
+    amuABIMultiBinaryFindEncoding
+    amuABIEncodingGetSignature
+    amuABIEncodingGetInputs
+    amuABIEncodingGetOutputs
+    amuABIEncodingGetCondOut
+    amuABIEncodingGetEarlyExit
+    amuABIEncodingGetGlobalBuffers
+    amuABIEncodingGetScratchBuffers
+    amuABIEncodingGetPersistentBuffers
+    amuABIEncodingGetLitConsts
+    amuABIEncodingGetConstBuffers
+    amuABIEncodingGetInputSamplerMaps
+    amuABIEncodingGetProgInfos
+    amuABIEncodingGetText
+    amuABIEncodingGetSymbols
+    amuABIEncodingGetSubConstantBuffers
+    amuABIMultiBinaryPack
+    amuABIMultiBinaryUnpack
+    amuABIMachineIsISA
+    amuABIMachineIsIL
+    amuABIMultiBinaryGetSize
+

@@ -1,0 +1,19 @@
+#define ScalarType float
+#define VectorType float4
+#define GROUP_SIZE 64
+Attribute[GroupSize(GROUP_SIZE, 1, 1)]
+kernel void sum_2d(VectorType cc, VectorType a<>, VectorType b[][], out VectorType c[][])
+{
+   shared VectorType lds[256]; // defines the amount of data per thread as 4 float4 (256/64)
+
+   int2 index = instance().xy;
+   int item  = 0;
+
+   //Writing to 0th offset of thread
+   lds[4 * instanceInGroup().x + 0] = cc + a + b[index.y][index.x];   // write to data of thread id item and at offset 0.
+   syncGroup();
+   
+   //Reading from last Thread
+   item = 4 * (GROUP_SIZE - 1 - instanceInGroup().x )+ 0;
+   c[index.y][index.x] = lds[item];           // read data of thread id (index/4) and at offset index%4.
+}

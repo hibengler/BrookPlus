@@ -1,0 +1,42 @@
+////////////////////////////////////////////////////////////////////////////////
+//!
+//! \file   loop.br
+//!
+//! \brief  Defines the loop kernel
+//!
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+//!
+//! \brief  Calculates sum of natural numbers based on index
+//!
+//! Given that index = i * width + j, the kernel calculates the sum of natural
+//! numbers from 1 to index using a for loop and stores it in position (i,j).
+//!
+//! \param  o   Output stream
+//!
+////////////////////////////////////////////////////////////////////////////////
+
+kernel void
+loopGPU(int width, out float o<>)
+{
+    // Get the (x,y) position of o in (index.x, index.y)
+    int2 index = instance().xy;
+
+    // Sum of the 3x3 matrix
+    float sum = 0.0f;
+
+    int start = 1;
+
+    // end = i * width + j
+    int end = index.y * width + index.x;
+
+    for(; start <= end; ++start)
+    {
+        sum += (float)start;
+    }
+
+    // Fetch a value from (y,x)
+    o = sum;
+}
+

@@ -1,0 +1,76 @@
+/****************************************************************************
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+
+/*****************************************************************************
+  \file floyd_warshall.br
+  \brief Find the shortest path in a weighted directed graph
+
+  From Wikipedia(10/15/2007):
+  The Floyd-Warshall algorithm compares all possible paths through the 
+  graph between each pair of vertices. Amazingly, it is able to do this
+  with only V3 comparisons (this is remarkable considering that there 
+  may be up to V2 edges in the graph, and every combination of edges 
+  is tested). It does so by incrementally improving an estimate on the
+  shortest path between two vertices, until the estimate is known to 
+  be optimal.
+  http://en.wikipedia.org/wiki/Floyd-Warshall_algorithm
+
+  How to interpret the results:
+    The distance/cost matrix is the distance/cost from one node to another.
+
+    The path matrix is the node from which you arrive at any particular node.
+    eg: - if the cell corresponding to moving from node 4 to node 6 says '3'
+          then, you will have to be going from 4 to 3 to 6. 
+          Next, you will have to see how you get to 3 from 4 and this 
+          may again be through other nodes and so on.
+ ****************************************************************************/
+
+kernel void 
+floyd_warshall(float inputDist[][], float inputPos[][], out float outDist<>, out float outPos<>, int step)
+{
+    float dirDist;
+    float indirDist;
+
+    // Output row
+    int i = instance().y;
+
+    // Output column
+    int j = instance().x;
+
+    dirDist = inputDist[i][j];
+    indirDist = inputDist[step][j] + inputDist[i][step];
+
+    outDist = (dirDist < indirDist) ? dirDist : indirDist;
+    outPos  = (dirDist < indirDist) ? inputPos[i][j] : inputPos[step][j];
+}

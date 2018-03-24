@@ -1,0 +1,362 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file domain.br
+  \brief Brook tests on the domain.
+
+  This test contains three tests that test various aspects of the domain.
+  domain_gather tests that gathering from a domain works. 
+  domain_read tests that reading from a domain works.
+  stream read/write tests that reading and writing over a domain works.
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+#define L  100
+#define W	100
+#define H  100
+
+static int retval = 0;
+
+/**
+ *
+ * \brief	Kernel to demonstrate the domain feature.
+ *			Reads elements from input stream using gather
+ *			and writes them to the output stream.
+ *
+ * \param	index		Index stream
+ * \param	g			Input array
+ * \param	result		Output stream
+ *
+*/
+kernel void domain_gather(float2 index<>, float2 g[][], out float2 result<>)
+{
+    result = g[index.y][index.x];
+}
+
+/**
+ *
+ * \brief	CPU version of domain gather
+ *
+ * \param	g			Input array
+ * \param	output		Output array
+ * \param	ystart		Y coordinate of the left-top of the sub domain
+ * \param	xstart		X coordinate of the left-top of the sub domain
+ * \param	ystop		Y coordinate of the right-bottom of the sub domain
+ * \param	xstop		X coordinate of the right-botom of the sub domain
+ *
+*/
+void domain_gather_cpu(float2 g[H][W], float2 output[L], int ystart, int xstart, int ystop, int xstop)
+{
+    int i = 0, y = 0;
+    for (i = ystart; i < ystop; ++i)
+    {
+        int j = 0;
+        for (j = xstart; j < xstop; ++y, ++j)
+        {
+            output[y] = g[i][j];
+        }
+    }
+}
+
+/**
+ *
+ * \brief			Kernel to demonstrate the domain feature.
+ *					Copies a sub-domain of the input stream
+ *					to the output stream.
+ *
+ * \param input		Input stream to read from
+ * \param output	Output stream to write to
+ *
+*/
+kernel void domain_read(float input<>, out float output<>)
+{
+    output = input;
+}
+
+int main(int argc, char** argv)
+{
+	unsigned int i = 0;
+
+    // domain_read arrays
+    float data1D[2][L];
+    float data2D[2][H][W]; 
+
+    // domain_gather arrays
+    float2 dataArray[2][L]; 
+    float2 gatherArray[H][W]; 
+
+    // domain streamRead/streamWrite arrays
+    float inputa1[L];
+    float inputa2[H][W];
+    float inputb1[7];
+    float inputb2[3][7];
+
+    // domain_write arrays
+    float dw[4][L];
+
+    struct infoRec cmd;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+
+	/////////////////////////////////////////////////////////////////////////
+	// Prepare input data
+	/////////////////////////////////////////////////////////////////////////
+
+    // domain read
+    fill_mat_f(data1D[0], 1, L, 100, RANDOM);
+    fill_mat_f((float*)data2D[0], H, W, 100, RANDOM);
+    fill_mat_f(data1D[1], 1, L, 100, RANDOM);
+    fill_mat_f((float*)data2D[1], H, W, 100, RANDOM);
+
+    // domain gather
+    fill_mat_f2((float2*)dataArray[0], 10, 10, L, POS);
+    fill_mat_f2((float2*)dataArray[1], 10, 10, L, POS);
+    fill_mat_f2((float2*)gatherArray, H, W, L, POS);
+
+    // domain streamRead/streamWrite
+    fill_mat_f(inputa1, 1, L, L, RANDOM);
+    fill_mat_f((float*)inputa2, H, W, L, RANDOM);
+    fill_mat_f(inputb1, 1, 7, 7, RANDOM);
+    fill_mat_f((float*)inputb2, 3, 7, 21, RANDOM);
+
+    // domain write
+    fill_mat_f(dw[0], 1, L, L, RANDOM);
+    fill_mat_f(dw[1], 1, L, L, RANDOM);
+    fill_mat_f(dw[2], 1, L, L, RANDOM);
+    fill_mat_f(dw[3], 1, L, L, RANDOM);
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print input data 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("Domain Read Input Data 1D:", "%3.2lf ", (float*)data1D[0], 1, L);
+        print_mat_f("Domain Read Input Data 2D:", "%3.2lf ", (float*)data2D[0], H, W);
+        print_mat_f2("Domain Gather Input Data:", "%3.2lf ", (float2*)dataArray[0], 10, 10);
+        print_mat_f2("Domain Gather Gather Data:", "%3.2lf ", (float2*)gatherArray, H, W);
+        print_mat_f("Domain streamRead Input:", "%3.2lf ",inputa1, 10, 10);
+        print_mat_f("Domain streamRead Input:", "%3.2lf ",(float*)inputa2, H, W);
+        print_mat_f("Domain streamWrite Input:", "%3.2lf ",inputb1, 1, 7);
+        print_mat_f("Domain streamWrite Input:", "%3.2lf ",(float*)inputb2, 3, 7);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f("Domain Read Input Data 1D:", "%3.2lf ", (float*)data1D[0], 1, W);
+        print_mat_f("Domain Read Input Data 2D:", "%3.2lf ", (float*)data2D[0], 1, W);
+        print_mat_f2("Domain Gather Input Data:", "%3.2lf ", (float2*)dataArray[0], 1, 10);
+        print_mat_f2("Domain Gather Gather Data:", "%3.2lf ", (float2*)gatherArray, 1, W);
+        print_mat_f("Domain streamRead Input:", "%3.2lf ",inputa1, 1, 10);
+        print_mat_f("Domain streamRead Input:", "%3.2lf ",(float*)inputa2, 1, W);
+        print_mat_f("Domain streamWrite Input:", "%3.2lf ",inputb1, 1, 7);
+        print_mat_f("Domain streamWrite Input:", "%3.2lf ",(float*)inputb2, 3, 7);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Brook code block
+	/////////////////////////////////////////////////////////////////////////
+	{
+        // domain_read streams
+        float a1<L>;
+        float b1<50>;
+        float a2<H, W>;
+        float b2<50, 50>;
+
+        // domain_gather streams
+        float2 index<L>;
+        float2 gather<H, W>;
+        float2 results<L>;
+
+        // domain streamRead/streamWrite streams
+        float c1< L >;
+        float c2< H, W >;
+
+        // domain write streams
+        float d1< L >;
+        float d2< L >;
+        float d3< 10, 10 >;
+        float d4< 10, 10 >;
+
+		// Record GPU Total time
+        Start(0);
+		for(i = 0; i < cmd.Iterations; i ++)
+		{
+			// domain_read reads
+			streamRead(a1, data1D[0]);
+			streamRead(a2, data2D[0]);
+			// domain_gather reads
+			streamRead(index, dataArray[0]);
+			streamRead(gather, gatherArray);
+			// domain streamRead
+			streamRead(c1, inputa1);
+			streamRead(c2, inputa2);
+			streamRead(c1.domain(19,19+7), inputb1);
+			streamRead(c2.domain(int2(1, 5), int2(8, 8)), inputb2);
+			// Zero out inputb1/b2
+			fill_mat_f(inputb1, 1, 7, 0, ZERO);
+			fill_mat_f((float*)inputb2, 3, 7, 0, ZERO);
+
+			// domain write
+			streamRead(d1, dw[0]);
+			streamRead(d2, dw[1]);
+			streamRead(d3, dw[2]);
+			streamRead(d4, dw[3]);
+
+			// Run the brook programs 
+			domain_read(a1.domain(30, 80), b1);
+			domain_read(a2.domain(int2(44, 32), int2(94, 82)), b2);
+			domain_gather(index, gather.domain(int2(0,7), int2(10, 17) ), results);
+			// domain write
+			domain_read(d1.domain(30,80), d2.domain(20,70));
+			domain_read(d3.domain(int2(3,5), int2(9,10)), d4.domain(int2(0,2), int2(6,7)));
+
+			// domain_read writes
+			streamWrite(b1, data1D[1]);
+			streamWrite(b2, data2D[1]);
+
+			// domain_gather writes
+			streamWrite(results, dataArray[1]);
+
+			// domain streamWrite
+			streamWrite(c1, inputa1);
+			streamWrite(c2, inputa2);
+			streamWrite(c1.domain(15, 15 + 7), inputb1);
+			streamWrite(c2.domain(int2(2, 4), int2(2+7, 4+3)), inputb2);
+
+			// domain write
+			streamWrite(d2, dw[2]);
+			streamWrite(d4, dw[3]);
+		}
+        Stop(0);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print results if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("Domain Read Output Data 1D:", "%3.2lf ", (float*)data1D[1], 1, L/2);
+        print_mat_f("Domain Read Output Data 2D:", "%3.2lf ", (float*)data2D[1], H/2, W/2);
+        print_mat_f2("Domain Gather Output Data:", "%3.2lf ", (float2*)dataArray[1], 10, 10);
+        print_mat_f("Domain streamRead Output:", "%3.2lf ",inputa1, 1, L);
+        print_mat_f("Domain streamRead Output:", "%3.2lf ",(float*)inputa2, H, W);
+        print_mat_f("Domain streamWrite Output:", "%3.2lf ",inputb1, 1, 7);
+        print_mat_f("Domain streamWrite Output:", "%3.2lf ",(float*)inputb2, 3, 7);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f("Domain Read Output Data 1D:", "%3.2lf ", (float*)data1D[1], 1, 50);
+        print_mat_f("Domain Read Output Data 2D:", "%3.2lf ", (float*)data2D[1], 1, 50);
+        print_mat_f2("Domain Gather Output Data:", "%3.2lf ", (float2*)dataArray[1], 1, 10);
+        print_mat_f("Domain streamRead Output:", "%3.2lf ",inputa1, 1, L);
+        print_mat_f("Domain streamRead Output:", "%3.2lf ",(float*)inputa2, 1, W);
+        print_mat_f("Domain streamWrite Output:", "%3.2lf ",inputb1, 1, 7);
+        print_mat_f("Domain streamWrite Output:", "%3.2lf ",(float*)inputb2, 3, 7);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time");
+		printf( "%-8d%-8d%-16d%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        float cpu1D[50];
+        float cpu2D[50][50];
+        float2 cpu_gather[L];
+        float sw_cpu1[7];
+        float sw_cpu2[3][7];
+        int res = 0;
+
+		printf("-e Verify correct output.\n");
+
+        // domain read
+        copy_mat_f(data1D[0], cpu1D, 0, 30, 1, 80, L);
+        copy_mat_f((float*)data2D[0], (float*)cpu2D, 32, 44, 82, 94, W);
+        res += compare_mat_f(data1D[1], cpu1D, 1, 50);
+        res += compare_mat_f((float*)data2D[1], (float*)cpu2D, 50, 50);
+
+        // domain gather
+        domain_gather_cpu(gatherArray, cpu_gather, 7, 0, 17, 10);
+        res += compare_mat_f2(dataArray[1], cpu_gather, 1, L);
+
+        // domain streamRead/streamWrite 
+        copy_mat_f(inputa1, sw_cpu1, 0, 15, 1, 22, L);
+        copy_mat_f((float*)inputa2, (float*)sw_cpu2, 4, 2, 7, 9, W);
+        res += compare_mat_f(inputb1, sw_cpu1, 1, 7);
+        res += compare_mat_f((float*)inputb2, (float*)sw_cpu2, 3, 7);
+
+        if (res)
+        {
+            printf("%s: Failed!\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+            retval = 0;
+        }
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+    return retval;
+}

@@ -1,0 +1,190 @@
+/****************************************************************************
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+ \file hello_brook.br
+ \brief A simple example using brook
+
+ The \e hello_brook sample determines the number of items in the vector that
+ are larger than a current value. The first kernel checks that a value is
+ larger than a constant value and writes 1 or 0 for every element.
+
+ The second kernel reduces the results down to a single value, which is the
+ sum of the number of elements that are larger than the current element
+ ****************************************************************************/
+
+#include <stdio.h>
+#include <common.h>
+
+float count = 0;
+unsigned int Length = 10;
+
+/**
+ *
+ * \brief			Kernel compares every element in the input
+ *					stream to the value in val. Returns 1 if larger
+ *					0 otherwise. 
+ * \param input		Input stream
+ * \param output	Output stream
+ * \param val		Value to check for 
+ *
+*/
+kernel void hello_brook_check(float input<>, out float output<>, float val)
+{
+    if (input > val)
+    {
+        output = 1.0f;
+    }
+    else
+    {
+        output = 0.0f;
+    }
+}
+
+/**
+ *
+ * \brief		Reduction kernel to sum all the values in the input
+ *				stream and store the result in the val stream. 
+ *
+ * \param input	Input stream
+ * \param val	Output stream of reduced dimensions
+ *
+ *
+*/
+reduce void hello_brook_sum(float input<>, reduce float val<>)
+{
+    val += input;
+}
+
+   	/////////////////////////////////////////////////////////////////////////
+    // calculating CPU result
+   	/////////////////////////////////////////////////////////////////////////
+
+void 
+hellobrook_cpu(float* input)
+{
+    unsigned int k;
+    for(k = 0; k < 10; ++k)
+    {
+        if(input[k] > (Length/3))
+        {
+            count = count + 1;
+        }
+    }
+}
+
+
+int main(int argc, char** argv)
+{
+    float* input  = NULL;
+    float* output = NULL;
+    unsigned int i = 0;
+    float result;
+    struct infoRec cmd;
+
+    ParseCommandLine(argc, argv, &cmd);
+
+    // Standardize the seed so that testing is easier
+    srand(cmd.Seed);
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Allocate memory
+   	/////////////////////////////////////////////////////////////////////////
+
+    input = (float*)malloc(sizeof *input * Length);
+    output = (float*)malloc(sizeof *output * Length);
+
+
+    if (!input || !output)
+    {
+        fprintf(stderr, "Error: Memory Allocation.\n");
+        return -1;
+    }
+
+    for (i = 0; i < Length; ++i)
+    {
+        input[i] = (float)(i);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Brook code block
+	/////////////////////////////////////////////////////////////////////////
+    { 
+        float inputStream<Length>;
+        float outputStream<Length>;
+        float res<1>;
+
+        streamRead(inputStream, input);
+        hello_brook_check(inputStream, outputStream, (float)Length / 3.0f);
+        hello_brook_sum(outputStream, res);
+        streamWrite(res, &result);
+    }
+    
+
+    /////////////////////////////////////////////////////////////////////////
+    // Verify against CPU implementation if requested 
+    /////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        hellobrook_cpu(input);
+        if(count == result)
+        {
+            printf("Passed\n");
+        }
+        else
+        {
+            printf("Failed\n");
+        }
+    }
+    else
+    {
+   	/////////////////////////////////////////////////////////////////////////
+	// Print results
+	/////////////////////////////////////////////////////////////////////////
+    printf("There are %lf elements larger than %lf in the stream.\n", result, (float)Length/3.0f);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+   	/////////////////////////////////////////////////////////////////////////
+    if (input)
+    {
+        free(input);
+    }
+    if (output)
+    {
+        free(output);
+    }
+
+    return 0;
+}

@@ -1,0 +1,124 @@
+/****************************************************************************
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file simple_matmult.br
+  \brief A simple matrix matrix multiplication example for any size matrix
+
+  This basic matrix matrix multiplication algorithm uses gather operations
+  to read the corresponding data points and mad's them to an accumulated
+  value.
+
+ ****************************************************************************/
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//!
+//! C = A * B
+//!         Simple matrix multiplication
+//! \param Width The value for which the loop runs over the matrices
+//! \param A Input matrix A(MxK)
+//! \param B Input matrix B(KxN)
+//! \param result Output matrix(MxN)
+//!
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+kernel void 
+simple_matmult(int Width, float A[][], float B[][], out float result<>) 
+{
+    // vPos - Position of the output matrix i.e. (x,y)
+    int2 vPos = instance().xy;
+
+    // row of the output
+    int i = vPos.y;
+
+    // column of the output
+    int j = vPos.x;
+
+    // accumulator - Accumulates the result of intermediate calculation
+    // between A & B
+    float accumulator = 0.0f;
+
+    // Running a  loop which starts from
+    // (0,vPos.y) in A and (vPos.x,0) in B
+    // and increments the 'y' value of A and the 'x' value of B
+    // which basically implies that we're fetching values from
+    // the 'vPos.y'th row of A and 'vPox.x'th column of B
+    int k = 0;
+    for(k = 0; k < Width; k = k + 1)
+    {
+        accumulator += A[i][k]*B[k][j];
+    }
+
+    // Writing the result back to the buffer
+    result = accumulator;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//!
+//! C = A * B
+//! \param Width The value for which the loop runs over the matrices
+//! \param A Input matrix A(MxK)
+//! \param B Input matrix B(KxN)
+//! \param result Output matrix(MxN)
+//!
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+kernel void 
+double_precision_simple_matmult(int Width, double A[][], double B[][], out double result<>) 
+{
+    // vPos - Position of the output matrix i.e. (x,y)
+    int2 vPos = instance().xy;
+
+    // row of the output
+    int i = vPos.y;
+
+    // column of the output
+    int j = vPos.x;
+
+    // accumulator - Accumulates the result of intermediate calculation
+    // between A & B
+    double accumulator = 0.0;
+    
+    // Running a  loop which starts from
+    // (0,vPos.y) in A and (vPos.x,0) in B
+    // and increments the 'y' value of A and the 'x' value of B
+    // which basically implies that we're fetching values from
+    // the 'vPos.y'th row of A and 'vPox.x'th column of B
+    int k = 0;
+    for(k = 0; k < Width; k = k + 1)
+    {
+        accumulator += A[i][k]*B[k][j];
+    }
+    
+    // Writing the result back to the buffer
+    result = accumulator;
+}

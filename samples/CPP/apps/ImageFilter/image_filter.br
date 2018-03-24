@@ -1,0 +1,72 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file image_filter.br
+  \brief Applies a 3x3 mask across the image
+
+
+
+ ****************************************************************************/
+
+/**
+*
+* \brief		Kernel applies a 3x3 filter to an image
+*	
+* \param img	Stream containing the input image
+* \param mask	The 3x3 filtering mask
+* \param o_img	The output stream with the filtered image
+*
+*/
+kernel void image_filter(float img[][], float mask[3][3], out float o_img<>)
+{
+    // Output position
+    int j = instance().x;
+    int i = instance().y;
+
+    // These are the offsets so no looping is needed
+
+    o_img  = img[i][j] * mask[0][0];
+    o_img += img[i][j+1] * mask[0][1];
+    o_img += img[i][j+2] * mask[0][2];
+
+    o_img += img[i+1][j] * mask[1][0];
+    o_img += img[i+1][j+1] * mask[1][1];
+    o_img += img[i+1][j+2] * mask[1][2];
+
+    o_img += img[i+2][j] * mask[2][0];
+    o_img += img[i+2][j+1] * mask[2][1];
+    o_img += img[i+2][j+2] * mask[2][2];
+}

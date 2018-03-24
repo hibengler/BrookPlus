@@ -1,0 +1,295 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file reduction.br
+  \brief A stress-test for reduction functionality
+
+  \i Matrix_mult, confirms that a runtime correctly groups elements when
+  performing reductions, and thus respects noncommutative operations.
+  \i Matrix_mult is associative but not commutative. It also shows how to
+  do a two stage approach by first reducing to four values and then
+  reducing again to a final value. This approach also shows how you can
+  reduce a stream to another stream.
+  \i Matrix_mul reduces an N 2x2 matrices stored as a float4 into
+  a single matrix by multiplying all the matrices together.
+
+  \i sum, confirms that it is possible to reduce a stream down to a single
+  value. This also tests that various sized streams can reduce to the
+  single value.
+  \i sum adds all the values of a stream together to sum up to a single
+  value.
+
+
+
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+static int retval = 0;
+
+/**
+ *
+ * \brief			Brook reduction kernel 
+ *					b = a[0] + a[1] + a[2] + ... + a[n-1]
+ *
+ * \param a			Input array
+ * \param b			Output containing sums
+ *
+*/
+reduce void sum(float4 a<>, reduce float4 b<>)
+{
+    b = b + a;
+}
+
+/**
+ *
+ * \brief			CPU implementation of reduction
+ *					b = a[0] + a[1] + a[2] + ... + a[n-1]
+ *
+ * \param a			Input array
+ * \param b			Output containing sums
+ * \param height	Height of input array
+ * \param width		Width  of input array
+ *
+*/
+void sum_cpu(float4* a, float4 *b, int height, int width)
+{
+    int i;
+    for (i = 0; i < height; ++i)
+    {
+        int j;
+        for (j = 0; j < width; ++j)
+        {
+            a->x = b[i * width + j].x + a->x;
+            a->y = b[i * width + j].y + a->y;
+            a->z = b[i * width + j].z + a->z;
+            a->w = b[i * width + j].w + a->w;
+        }
+    }
+}
+
+/**
+ *
+ * \brief			Matrix multiplication using reduction 
+ *					A = B[0] * B[1] * B[2] * ... * B[N-1] where A,B are 2x2 matrices
+ *
+ * \param a			Output contain matrix sums
+ * \param b			Input stream of 2x2 matrices (stored as float4's)
+ *
+*/
+reduce void matrix_mult(reduce float4 a<>, float4 b<>)
+{
+    a = float4 (a.x * b.x + a.y * b.z, a.x * b.y + a.y * b.w,
+            a.z * b.x + a.w * b.z, a.z * b.y + a.w * b.w);
+}
+
+/**
+ *
+ * \brief			CPU implementation of 2x2 
+ *					Matrix multiplication 
+ *					A = B[0] * B[1] * B[2] * ... * B[N-1] where A,B are 2x2 matrices
+ *
+ * \param a			Output contain matrix sums
+ * \param b			Input array of 2x2 matrices (stored as float4's)
+ * \param Length	Length of input array
+ *
+*/
+void matrix_mult_cpu(float4* a, float4* b, unsigned int Length)
+{
+    unsigned int i;
+    a->x = b[0].x * b[1].x + b[0].y * b[1].z;
+    a->y = b[0].x * b[1].y + b[0].y * b[1].w;
+    a->z = b[0].z * b[1].x + b[0].w * b[1].z;
+    a->w = b[0].z * b[1].y + b[0].w * b[1].w;
+    for (i = 2; i < Length; ++i)
+    {
+        *a = float4 (a->x * b[i].x + a->y * b[i].z,
+                a->x * b[i].y + a->y * b[i].w,
+                a->z * b[i].x + a->w * b[i].z,
+                a->z * b[i].y + a->w * b[i].w);
+    }
+}
+
+int main(int argc, char** argv)
+{
+    float4 qresult[1][4];
+    float4 input[10][10];
+    float4 varmat[30][12];
+    float4 result0;
+    float4 result1;
+    float4 sum_res[3];
+    struct infoRec cmd;
+
+    unsigned int Height = 10;
+    unsigned int Width  = 10;
+    unsigned int Length = 100;
+    unsigned int i = 0;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Prepare input data 
+   	/////////////////////////////////////////////////////////////////////////
+    fill_mat_f4((float4*)input, Height, Width, 1, RANDOM);
+    fill_mat_f4((float4*)varmat, 30, 12, 1, RANDOM);
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Print input data
+   	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f4("Input Matrix:", "%3.2lf ", (float4*)input, Height, Width);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f4("Input Matrix:", "%3.2lf ", (float4*)input, 1, Width);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Brook code block
+   	/////////////////////////////////////////////////////////////////////////
+    {
+        float4 matrices<1,100>;
+        float4 quadresult <1,4>;
+        float4 variable<30, 12>;
+
+		// Record GPU Total time
+        Start(0);
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+			// Put write to stream 
+			streamRead(matrices, input);
+			streamRead(variable, varmat);
+
+			// Run the brook program here
+			matrix_mult(quadresult, matrices);
+			matrix_mult(result0, matrices);
+			matrix_mult(result1, quadresult);
+			sum(matrices, sum_res[0]);
+			sum(quadresult, sum_res[1]);
+			sum(variable, sum_res[2]);
+
+			// Write data back from stream here
+			streamWrite(quadresult, qresult);
+        }
+        Stop(0);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Print results if requested
+   	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f4("Output Data: ", "%3.2lf ",(float4*)qresult, 1, 4);
+        printf("Single Stage:\n { %3.2lf, %3.2lf, %3.2lf, %3.2lf }\n",
+                result0.x, result0.y, result0.z, result0.w);
+        printf("Two Stage:\n { %3.2lf, %3.2lf, %3.2lf, %3.2lf }\n",
+                result1.x, result1.y, result1.z, result1.w);
+        print_mat_f4("Sum Results: ", "%3.2lf ", (float4*)sum_res, 3, 1);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        print_mat_f4("Output Data: ", "%3.2lf ",(float4*)qresult, 1, 1);
+        printf("Single Stage:\n { %3.2lf, %3.2lf, %3.2lf, %3.2lf }\n",
+                result0.x, result0.y, result0.z, result0.w);
+        printf("Two Stage:\n { %3.2lf, %3.2lf, %3.2lf, %3.2lf }\n",
+                result1.x, result1.y, result1.z, result1.w);
+        print_mat_f4("Sum Results: ", "%3.2lf ", (float4*)sum_res, 1, 1);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time");
+		printf( "%-8d%-8d%-16d%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        int res = 0;
+        float4 result_cpu = float4(0.f, 0.f, 0.f, 0.f);
+        float4 sum_res_cpu[3] = { float4(0.f, 0.f, 0.f, 0.f),
+            float4(0.f, 0.f, 0.f, 0.f),
+            float4(0.f, 0.f, 0.f, 0.f) };
+
+		printf("-e Verify correct output.\n");
+
+        matrix_mult_cpu(&result_cpu, (float4*)input, Length);
+        sum_cpu(&sum_res_cpu[0], (float4*)input, 1, Length);
+        sum_cpu(&sum_res_cpu[1], (float4*)qresult, 1, 4);
+        sum_cpu(&sum_res_cpu[2], (float4*)varmat, 30, 12);
+        res += compare_mat_f4((float4*)&result_cpu, (float4*)&result1, 1, 1);
+        res += compare_mat_f4((float4*)&sum_res_cpu[0], (float4*)&sum_res[0], 1, 3);
+        if (res)
+        {
+            printf("%s: Failed!\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+            retval = 0;
+        }
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+	return retval;
+}

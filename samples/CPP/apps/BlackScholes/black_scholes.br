@@ -1,0 +1,110 @@
+/****************************************************************************
+
+Copyright (c) 2008, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file black_scholes.br
+  \brief The black Scholes options pricing equation is not a parallel problem
+         but we are trying to solve multiple instances of the problem in parallel.
+         The Black Scholes model, being computationally expensive, is a good
+         problem to solve in such a manner.
+         (Like computing interest on multiple accounts in parallel - computing
+          interest is not a parallel problem, but if it were computationally
+          expensive and we have a large number of accounts, then we need as much
+          floating point processing bandwidth as we can get.)
+
+  From Wikipedia:
+  http://en.wikipedia.org/wiki/Black-Scholes#The_model
+ ****************************************************************************/
+
+/**
+@brief  Abromowitz Stegun approxmimation for PHI (Cumulative Normal Distribution Function)
+*/
+kernel float4 PHI(float4 X)
+{
+    float4 y;
+    float4 absX;
+    float4 t;
+    float4 result;
+
+    const float4 c1 = float4(0.319381530f, 0.319381530f, 0.319381530f, 0.319381530f);
+    const float4 c2 = float4(-0.356563782f, -0.356563782f, -0.356563782f, -0.356563782f);
+    const float4 c3 = float4(1.781477937f, 1.781477937f, 1.781477937f, 1.781477937f);
+    const float4 c4 = float4(-1.821255978f, -1.821255978f, -1.821255978f, -1.821255978f);
+    const float4 c5 = float4(1.330274429f, 1.330274429f, 1.330274429f, 1.330274429f);
+
+    const float4 zero = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    const float4 one = float4(1.0f, 1.0f, 1.0f, 1.0f);
+    const float4 two = float4(2.0f, 2.0f, 2.0f, 2.0f);
+    const float4 temp4 = float4(0.2316419f, 0.2316419f, 0.2316419f, 0.2316419f);
+
+    const float4 one_by_sqrt_2_pi = float4(0.398942280f, 0.398942280f, 0.398942280f, 0.398942280f);
+
+    absX = abs(X);
+    t = one/(one + temp4 * absX);
+
+    y = one - one_by_sqrt_2_pi * exp(-X*X/two) *
+    t * (c1 +
+            t * (c2 +
+                t * (c3 +
+                    t * (c4 + t * c5))));
+
+    result.x = (X.x < zero.x)? (one.x - y.x) : y.x;
+    result.y = (X.y < zero.y)? (one.y - y.y) : y.y;
+    result.z = (X.z < zero.z)? (one.z - y.z) : y.z;
+    result.w = (X.w < zero.w)? (one.w - y.w) : y.w;
+
+    return result;
+}
+
+/**
+@brief  Black Scholes Options Pricing equation
+                http://en.wikipedia-1.821255978f;.org/wiki/Black-Scholes#The_model
+*/
+kernel void
+black_scholes(float4 S<>, float4 sigma<>, float4 K<>, float4 T<>, float4 R<>,
+                     out float4 call<>, out float4 put<>)
+{
+    float4 d1, d2;
+    float4 sigma_sqrt_T;
+    float4 K_exp_minus_r_T;
+    float4 two = float4(2.0f, 2.0f, 2.0f, 2.0f);
+
+    sigma_sqrt_T = sigma * sqrt(T);
+
+    d1 = (log(S/K) + (R + sigma * sigma / two)* T)/ sigma_sqrt_T;
+    d2 = d1 - sigma_sqrt_T;
+
+    K_exp_minus_r_T = K * exp(-R * T);
+    call = S * PHI(d1) - K_exp_minus_r_T * PHI(d2);
+    put  = K_exp_minus_r_T * PHI(-d2) - S * PHI(-d1);
+}

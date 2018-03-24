@@ -1,0 +1,5 @@
+kernel void writePos(out int2 a<>)
+{
+    int2 index = instance().xy;
+    a = index;
+}

@@ -1,0 +1,89 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2008, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/***************************************************************************
+  \file binary_search.br
+  \brief A brook app that implements the parallel binary search algorithm.
+
+  Parallel Binary Search
+  Finds index of first occurance in an array of Width floats of each of a given
+  set of NUM_SEARCHES values.  If value not present found, search produces -1.
+****************************************************************************/
+
+/**
+ * @param searchValue   Search Key
+ * @param array         List of elements to be searched 
+ * @param index         Index of searched element of insert position
+ * @param arraySize     Size of search list
+ * @param lgWidth
+ * @brief               Brook kernel to search for an element \i searchValue 
+ *                      in a list \i array and return the index in \i index 
+ */
+kernel void binary_search(float searchValue<>, float array[], out float index<>, float arraySize, int lgWidth)
+{
+    // Note: preprocessor not run on Brook code, so have to explicitly set numIter
+    // here.  Must keep this consistent with LG_Width for correctness.
+    float stride;
+    float compareValue, dir;
+
+    float idx = stride = floor((arraySize * 0.5f) + 0.5f);
+
+    int i;
+    for (i = 0; i < lgWidth; ++i)
+    {
+        stride = floor((stride * 0.5f) + 0.5f);
+        compareValue = array[idx];
+        dir = (searchValue <= compareValue) ? -1.0f : 1.0f;
+        idx = idx + dir * stride;
+    }
+
+    // last iteration has stride fixed at 1
+    compareValue = array[idx];
+    idx = idx + ((searchValue <= compareValue) ? -1.0f : 1.0f);
+
+    // last pass check (we could be pointing
+    compareValue = array[idx];
+    idx = idx + ((searchValue <= compareValue) ? 0.0f : 1.0f);
+    if (idx < 0.0f)
+    {
+      idx = 0.0f;
+    }
+
+    // if we've found the value, write the array index into the output, otherwise, write -1
+    compareValue = array[idx];
+    idx = (abs(searchValue - compareValue) < 0.000001f) ? idx : -1.0f;
+
+    index = idx;
+}

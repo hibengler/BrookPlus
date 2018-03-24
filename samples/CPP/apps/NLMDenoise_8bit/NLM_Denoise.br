@@ -1,0 +1,206 @@
+/****************************************************************************
+
+Copyright (c) 2008, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+  * Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+
+/*****************************************************************************
+  \file NLM_Denoise.br
+  \brief Non-Linear Means Image Denoise Algorithm in Brook
+
+
+     0 1 2 3 4 5 6 7
+   0 + . . . . . . .
+   1 . . . . . . . .
+   2 . . . . . . . .
+   3 . . . * . . . .
+   4 . . . . . . . .
+   5 . . . . . . . .
+   6 . . . . . . . .
+   7 . . . . . . . .
+
+   * - Base point for every thread, + - pixel around which ColorDistance is computed
+   The idea behind this method:
+   - Every thread computes its color distance to the center of its
+     corresponding 8x8 block.
+   - The color distance is written out to a texture.
+   - The original value is filtered based on the weights of each threads
+     corresponding 8x8 block and the 8x8 weight block
+
+   For more information:
+    http://developer.download.nvidia.com/compute/cuda/sdk/website/projects/imageDenoising/doc/imageDenoising.pdf
+    http://dmi.uib.es/~abuades/publicacions/cvpr.pdf
+****************************************************************************/
+
+/**
+ *
+ * \brief       Returns the norm of a 3 element vector
+ *                      stored in the x,y,z of a float4
+ * \param a     Input vector
+ * \param b     Length of input vector a
+ *
+ */
+kernel float vecLen(float4 a, float4 b)
+{
+    return (
+        (b.x - a.x) * (b.x - a.x) +
+        (b.y - a.y) * (b.y - a.y) +
+        (b.z - a.z) * (b.z - a.z)
+        );
+}
+
+/**
+ *
+ * \brief       Floating point linear interpolation
+ *                      between two values      a and b.
+ *                      Answer returned in c
+ *
+ * \param a     Lower value
+ * \param b     Upper value
+ *
+ */
+kernel float lerpf(float a, float b, float c)
+{
+    return a + (b - a) * c;
+}
+
+
+kernel void Normalize_Input(uchar4 input<>, float tmax, float tmin, out float4 output<>)
+{
+    float4 temp = (float4)input;
+
+    temp.x = (((temp.x - tmin) * 1.0f) / (tmax - tmin));
+    temp.y = (((temp.y - tmin) * 1.0f) / (tmax - tmin));
+    temp.z = (((temp.z - tmin) * 1.0f) / (tmax - tmin));
+    temp.w = (((temp.w - tmin) * 1.0f) / (tmax - tmin));
+
+    output = temp;
+}
+
+kernel void NLM_Denoise_Pass2(out float4 output<>, float4 weights[][], float4 input[][], float inv_win)
+{
+    // Output position
+    int si = instance().y;
+    int sj = instance().x;
+
+    int i = si % 8;
+    int j = sj % 8;
+
+    float fcount = 0.0f;
+    float4 sumWeights = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float3 clr = float3(0.0f, 0.0f, 0.0f), clr00 = float3(0.0f, 0.0f, 0.0f);
+    float lerpQ = 0.0f;
+    int wi = 0;
+    int ii = 0;
+    int jj = 0;
+    float4 one4 = float4(1.0f, 1.0f, 1.0f, 1.0f);
+    ii = si - i;
+    // Cycle through NLM window, surrounding (x, y) texel
+    for (wi = -3; wi <= 4; ++wi)
+    {
+        int wj;
+        jj = sj - j;
+        for (wj = -3; wj <= 4; ++wj)
+        {
+            float4 weightIJ = weights[ii][jj];
+
+            // Accumulate (x + j, y + i) texel color with computed weight
+            float4 clrIJ = input[wi + si][wj + sj];
+            clr += clrIJ.xyz * weightIJ.xyz;
+
+            // Sum of weights for color normalization to [0..1] range
+            sumWeights += weightIJ;
+
+            // Update weight counter, if NLM weight for current window texel
+            // exceeds the weight threshoold
+            fcount     += (weightIJ.x > 0.1f) ? inv_win : 0.0f;
+            ++jj;
+        }
+        ++ii;
+    }
+
+    // Normalize result color by 1 134 559 232sum of weights
+    sumWeights = one4 / sumWeights;
+    clr *= sumWeights.xyz;
+
+    // Choose LERP quotent basing on how many texels
+    // within the NLM window exceeded the weight threshold
+    lerpQ = (fcount > 0.1f) ? 0.20f : 0.80f;
+
+    // Write final results to global memory
+    clr00 = input[si][sj].xyz;
+    clr.x = lerpf(clr.x, clr00.x, lerpQ);
+    clr.y = lerpf(clr.y, clr00.y, lerpQ);
+    clr.z = lerpf(clr.z, clr00.z, lerpQ);
+    output = float4(clr.x, clr.y, clr.z, 0.0f);
+}
+
+kernel void NLM_Denoise_Pass1(out float4 output<>, float4 input[][], float noise, float inv_win)
+{
+    // Output position
+    int si = instance().y;
+    int sj = instance().x;
+
+    int ci = si + 3;
+    int cj = sj + 3;
+
+    float dist, res;
+    float weight = 0.0f;
+
+    int n;
+    int i = 0, j = 0;
+
+    // Center for current pixel
+    i = si % 8;
+    j = sj % 8;
+
+    ci = (si - i) + 3;
+    cj = (sj - j) + 3;
+
+    weight = 0.0f;
+    for (n = -3; n <= 3; ++n)
+    {
+        int m;
+        for (m = -3; m <= 3; ++m)
+        {
+            float4 val1 = input[ci + n][cj + m];
+            float4 val2 = input[si + n][sj + m];
+            weight += vecLen(val1, val2);
+        }
+    }
+
+    dist = (float)((i - 3) * (i - 3) +
+                   (j - 3) * (j - 3));
+
+    res = exp( -(weight * noise + dist * inv_win));
+    output = float4(res, res, res, res);
+}
+

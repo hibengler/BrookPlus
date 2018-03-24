@@ -1,0 +1,108 @@
+/****************************************************************************
+
+Copyright (c) 2008, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file optimized_matmult.br
+  \brief An optimized matrix multiplication algorithm using 8 MRT's
+    
+  Matrix multiplication algorithm using 8 MRT's to work on 8 seperate parts
+  of the matrix in concurrently. Wikipedia entry:
+  http://en.wikipedia.org/wiki/Matrix_multiplication
+
+  The current implimentation breaks each 8x4 subblock into a 2x2 block
+  and a 2x2 block and stored in row major order.
+
+ ****************************************************************************/
+
+/**
+* \brief 8 MRT multiplication
+*/
+kernel void
+optimized_matmult(int loopVar0,
+        float4 A1[][], float4 A2[][], float4 A3[][], float4 A4[][],
+        float4 A5[][], float4 A6[][], float4 A7[][], float4 A8[][],
+        float4 B1[][], float4 B2[][], float4 B3[][], float4 B4[][],
+        out float4 C1<>, out float4 C2<>, out float4  C3<>, out float4 C4<>,
+        out float4 C5<>, out float4 C6<>, out float4  C7<>, out float4 C8<>)
+{
+    // Setting zero
+    float4 zero = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    // Declaring and initializing accumulators
+    float4 accumulator1 = zero;
+    float4 accumulator2 = zero;
+    float4 accumulator3 = zero;
+    float4 accumulator4 = zero;
+    float4 accumulator5 = zero;
+    float4 accumulator6 = zero;
+    float4 accumulator7 = zero;
+    float4 accumulator8 = zero;
+
+    // Row number of output position
+    int i = instance().y;
+
+    // Column number of output position
+    int j = instance().x;
+
+    int k = 0;
+    for(; k < loopVar0; ++k)
+    {
+        // Fetching values from A
+        float4 A11 = A1[i][k];  float4 A22 = A2[i][k];
+        float4 A33 = A3[i][k];  float4 A44 = A4[i][k];
+        float4 A55 = A5[i][k];  float4 A66 = A6[i][k];
+        float4 A77 = A7[i][k];  float4 A88 = A8[i][k];
+
+        // Fetching values from B
+        float4 B11 = B1[k][j];  float4 B22 = B2[k][j];
+        float4 B33 = B3[k][j];  float4 B44 = B4[k][j];
+
+        accumulator1 += A11.xxxx * B11.xyzw + A11.yyyy * B22.xyzw + A11.zzzz * B33.xyzw + A11.wwww * B44.xyzw;
+        accumulator2 += A22.xxxx * B11.xyzw + A22.yyyy * B22.xyzw + A22.zzzz * B33.xyzw + A22.wwww * B44.xyzw;
+        accumulator3 += A33.xxxx * B11.xyzw + A33.yyyy * B22.xyzw + A33.zzzz * B33.xyzw + A33.wwww * B44.xyzw;
+        accumulator4 += A44.xxxx * B11.xyzw + A44.yyyy * B22.xyzw + A44.zzzz * B33.xyzw + A44.wwww * B44.xyzw;
+        accumulator5 += A55.xxxx * B11.xyzw + A55.yyyy * B22.xyzw + A55.zzzz * B33.xyzw + A55.wwww * B44.xyzw;
+        accumulator6 += A66.xxxx * B11.xyzw + A66.yyyy * B22.xyzw + A66.zzzz * B33.xyzw + A66.wwww * B44.xyzw;
+        accumulator7 += A77.xxxx * B11.xyzw + A77.yyyy * B22.xyzw + A77.zzzz * B33.xyzw + A77.wwww * B44.xyzw;
+        accumulator8 += A88.xxxx * B11.xyzw + A88.yyyy * B22.xyzw + A88.zzzz * B33.xyzw + A88.wwww * B44.xyzw;
+    }
+
+    C1 = accumulator1;
+    C2 = accumulator2;
+    C3 = accumulator3;
+    C4 = accumulator4;
+    C5 = accumulator5;
+    C6 = accumulator6;
+    C7 = accumulator7;
+    C8 = accumulator8;
+}

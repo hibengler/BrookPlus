@@ -1,0 +1,840 @@
+/****************************************************************************
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Advanced Micro Devices, Inc nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file OptimizedMatrixMult.br
+  \brief An optimized matrix multiplication algorithm using 8 MRT's
+    
+  Matrix multiplication algorithm using 8 MRT's to work on 8 seperate parts
+  of the matrix in concurrently. Wikipedia entry:
+  http://en.wikipedia.org/wiki/Matrix_multiplication
+
+  The current implimentation breaks each 8x4 subblock into a 2x2 block
+  and a 2x2 block and stored in row major order.
+
+ ****************************************************************************/
+#define MAX_SPLIT 128
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 8 MRT multiplication
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+kernel void 
+optimized_matmult_float(float loopVar0,
+                              float4 A1[][], float4 A2[][], float4 A3[][], float4 A4[][],
+                              float4 A5[][], float4 A6[][], float4 A7[][], float4 A8[][],
+                              float4 B1[][], float4 B2[][], float4 B3[][], float4 B4[][],
+                              out float4 C1<>, out float4 C2<>, out float4  C3<>, out float4 C4<>,
+                              out float4 C5<>, out float4 C6<>, out float4  C7<>, out float4 C8<>){
+    // vPos - Position of the output matrix i.e. (x,y)
+    float2 vPos = indexof(C1).xy;
+    
+    // Setting four210
+    float4 four210 = float4(4.0f, 2.0f, 1.0f, 0.0f);
+    
+    // index - coordinates of A & B from where the values are fetched
+    float4 index = float4(vPos.x, vPos.y, four210.w, four210.w);
+
+    // Declaring and initializing accumulators
+    float4 accumulator1 = four210.wwww;
+    float4 accumulator2 = four210.wwww;
+    float4 accumulator3 = four210.wwww;
+    float4 accumulator4 = four210.wwww;
+    float4 accumulator5 = four210.wwww;
+    float4 accumulator6 = four210.wwww;
+    float4 accumulator7 = four210.wwww;
+    float4 accumulator8 = four210.wwww;
+    
+    float i0 = loopVar0;    
+    
+    while(i0 > 0.0f)
+    {
+            // Fetching values from A
+            float4 A11 = A1[index.y][index.w];
+            float4 A22 = A2[index.y][index.w];
+            float4 A33 = A3[index.y][index.w];
+            float4 A44 = A4[index.y][index.w];
+            float4 A55 = A5[index.y][index.w];
+            float4 A66 = A6[index.y][index.w];
+            float4 A77 = A7[index.y][index.w];
+            float4 A88 = A8[index.y][index.w];
+            
+            // Fetching values from B
+            float4 B11 = B1[index.w][index.x];
+            float4 B22 = B2[index.w][index.x];
+            float4 B33 = B3[index.w][index.x];
+            float4 B44 = B4[index.w][index.x];    
+            
+            accumulator1 += A11.xxxx * B11.xyzw + A11.yyyy * B22.xyzw + A11.zzzz * B33.xyzw + A11.wwww * B44.xyzw;   
+            accumulator2 += A22.xxxx * B11.xyzw + A22.yyyy * B22.xyzw + A22.zzzz * B33.xyzw + A22.wwww * B44.xyzw;     
+            accumulator3 += A33.xxxx * B11.xyzw + A33.yyyy * B22.xyzw + A33.zzzz * B33.xyzw + A33.wwww * B44.xyzw;     
+            accumulator4 += A44.xxxx * B11.xyzw + A44.yyyy * B22.xyzw + A44.zzzz * B33.xyzw + A44.wwww * B44.xyzw;     
+            accumulator5 += A55.xxxx * B11.xyzw + A55.yyyy * B22.xyzw + A55.zzzz * B33.xyzw + A55.wwww * B44.xyzw;     
+            accumulator6 += A66.xxxx * B11.xyzw + A66.yyyy * B22.xyzw + A66.zzzz * B33.xyzw + A66.wwww * B44.xyzw;     
+            accumulator7 += A77.xxxx * B11.xyzw + A77.yyyy * B22.xyzw + A77.zzzz * B33.xyzw + A77.wwww * B44.xyzw;     
+            accumulator8 += A88.xxxx * B11.xyzw + A88.yyyy * B22.xyzw + A88.zzzz * B33.xyzw + A88.wwww * B44.xyzw;
+            
+            index += four210.wwwz;
+        // Reducing iterator
+        i0 = i0 - 1.0f;
+    }
+    
+    C1 = accumulator1;
+    C2 = accumulator2;
+    C3 = accumulator3;
+    C4 = accumulator4;
+    C5 = accumulator5;
+    C6 = accumulator6;
+    C7 = accumulator7;
+    C8 = accumulator8;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 8 MRT multiplication for integer data type.
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+kernel void 
+optimized_matmult_int(int loopVar0,
+                              int4 A1[][], int4 A2[][], int4 A3[][], int4 A4[][],
+                              int4 A5[][], int4 A6[][], int4 A7[][], int4 A8[][],
+                              int4 B1[][], int4 B2[][], int4 B3[][], int4 B4[][],
+                              out int4 C1<>, out int4 C2<>, out int4  C3<>, out int4 C4<>,
+                              out int4 C5<>, out int4 C6<>, out int4  C7<>, out int4 C8<>){
+    // vPos - Position of the output matrix i.e. (x,y)
+    int2 vPos = instance().xy;
+    
+    // Setting four210
+    int4 four210 = int4(4, 2, 1, 0);
+    
+    // index - coordinates of A & B from where the values are fetched
+    int4 index = int4(vPos.x, vPos.y, four210.w, four210.w);
+
+    // Declaring and initializing accumulators
+    int4 accumulator1 = four210.wwww;
+    int4 accumulator2 = four210.wwww;
+    int4 accumulator3 = four210.wwww;
+    int4 accumulator4 = four210.wwww;
+    int4 accumulator5 = four210.wwww;
+    int4 accumulator6 = four210.wwww;
+    int4 accumulator7 = four210.wwww;
+    int4 accumulator8 = four210.wwww;
+    
+    int i0 = loopVar0;    
+    
+    while(i0 > 0)
+    {
+            // Fetching values from A
+            int4 A11 = A1[index.y][index.w];
+            int4 A22 = A2[index.y][index.w];
+            int4 A33 = A3[index.y][index.w];
+            int4 A44 = A4[index.y][index.w];
+            int4 A55 = A5[index.y][index.w];
+            int4 A66 = A6[index.y][index.w];
+            int4 A77 = A7[index.y][index.w];
+            int4 A88 = A8[index.y][index.w];
+            
+            // Fetching values from B
+            int4 B11 = B1[index.w][index.x];
+            int4 B22 = B2[index.w][index.x];
+            int4 B33 = B3[index.w][index.x];
+            int4 B44 = B4[index.w][index.x];    
+            
+            accumulator1 += A11.xxxx * B11.xyzw + A11.yyyy * B22.xyzw + A11.zzzz * B33.xyzw + A11.wwww * B44.xyzw;   
+            accumulator2 += A22.xxxx * B11.xyzw + A22.yyyy * B22.xyzw + A22.zzzz * B33.xyzw + A22.wwww * B44.xyzw;     
+            accumulator3 += A33.xxxx * B11.xyzw + A33.yyyy * B22.xyzw + A33.zzzz * B33.xyzw + A33.wwww * B44.xyzw;     
+            accumulator4 += A44.xxxx * B11.xyzw + A44.yyyy * B22.xyzw + A44.zzzz * B33.xyzw + A44.wwww * B44.xyzw;     
+            accumulator5 += A55.xxxx * B11.xyzw + A55.yyyy * B22.xyzw + A55.zzzz * B33.xyzw + A55.wwww * B44.xyzw;     
+            accumulator6 += A66.xxxx * B11.xyzw + A66.yyyy * B22.xyzw + A66.zzzz * B33.xyzw + A66.wwww * B44.xyzw;     
+            accumulator7 += A77.xxxx * B11.xyzw + A77.yyyy * B22.xyzw + A77.zzzz * B33.xyzw + A77.wwww * B44.xyzw;     
+            accumulator8 += A88.xxxx * B11.xyzw + A88.yyyy * B22.xyzw + A88.zzzz * B33.xyzw + A88.wwww * B44.xyzw;
+            
+            index += four210.wwwz;
+        // Reducing iterator
+        i0 = i0 - 1;
+    }
+    
+    C1 = accumulator1;
+    C2 = accumulator2;
+    C3 = accumulator3;
+    C4 = accumulator4;
+    C5 = accumulator5;
+    C6 = accumulator6;
+    C7 = accumulator7;
+    C8 = accumulator8;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 8 MRT multiplication for double data type.
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+kernel void 
+optimized_matmult_double(float loopVar0,
+                              double2 A1[][], double2 A2[][], double2 A3[][], double2 A4[][],
+                              double2 A5[][], double2 A6[][], double2 A7[][], double2 A8[][],
+                              double2 B1[][], double2 B2[][],
+                              out double2 C1<>, out double2 C2<>, out double2 C3<>, out double2 C4<>,
+                              out double2 C5<>, out double2 C6<>, out double2 C7<>, out double2 C8<>){
+    // vPos - Position of the output matrix i.e. (x,y)
+    float2 vPos = indexof(C1).xy;
+    
+    // Setting four210
+    float4 four210 = float4(4.0f, 2.0f, 1.0f, 0.0f);
+    
+    // index - coordinates of A & B from where the values are fetched
+    float4 index = float4(vPos.x, vPos.y, four210.w, four210.w);
+    
+    double2 zero = double2(0.0, 0.0);
+
+    // Declaring and initializing accumulators
+    double2 accumulator1 = zero;
+    double2 accumulator2 = zero;
+    double2 accumulator3 = zero;
+    double2 accumulator4 = zero;
+    double2 accumulator5 = zero;
+    double2 accumulator6 = zero;
+    double2 accumulator7 = zero;
+    double2 accumulator8 = zero;
+    
+    float i0 = loopVar0;    
+    
+    for(; i0 > 0.0f; i0 -= 1.0f )
+    {
+            // Fetching values from A
+            double2 A11 = A1[index.y][index.w];
+            double2 A22 = A2[index.y][index.w];
+            double2 A33 = A3[index.y][index.w];
+            double2 A44 = A4[index.y][index.w];
+            double2 A55 = A5[index.y][index.w];
+            double2 A66 = A6[index.y][index.w];
+            double2 A77 = A7[index.y][index.w];
+            double2 A88 = A8[index.y][index.w];
+            
+            // Fetching values from B
+            double2 B11 = B1[index.w][index.x];
+            double2 B22 = B2[index.w][index.x];
+              
+            
+            accumulator1 += A11.xx * B11.xy + A11.yy * B22.xy;   
+            accumulator2 += A22.xx * B11.xy + A22.yy * B22.xy;     
+            accumulator3 += A33.xx * B11.xy + A33.yy * B22.xy;     
+            accumulator4 += A44.xx * B11.xy + A44.yy * B22.xy;     
+            accumulator5 += A55.xx * B11.xy + A55.yy * B22.xy;     
+            accumulator6 += A66.xx * B11.xy + A66.yy * B22.xy;     
+            accumulator7 += A77.xx * B11.xy + A77.yy * B22.xy;     
+            accumulator8 += A88.xx * B11.xy + A88.yy * B22.xy;
+            
+            index += four210.wwwz;
+    }
+    
+    C1 = accumulator1;
+    C2 = accumulator2;
+    C3 = accumulator3;
+    C4 = accumulator4;
+    C5 = accumulator5;
+    C6 = accumulator6;
+    C7 = accumulator7;
+    C8 = accumulator8;
+}
+
+// Naive matmult implementation for comparison with CPU for float data type.
+void 
+floatMatMultCPU(float* inputA, float* inputB, float* cpuOutput, int M, int N, int K)
+{
+    int i;
+    for (i = 0; i < M; i++)
+    {
+        int j;
+        for (j = 0; j < N; j++)
+        {
+            float temp = 0;
+            int k;
+            for (k = 0; k < K; k++)
+            {
+                temp += inputA[i * K + k] * inputB[k * N + j];
+            }
+
+            cpuOutput[i * N + j] = temp;
+        }
+    }    
+}
+
+// Naive matmult implementation for comparison with CPU for integer data type.
+void 
+intMatMultCPU(int* inputA, int* inputB, int* cpuOutput, int M, int N, int K)
+{
+    int i;
+    for (i = 0; i < M; i++)
+    {
+        int j;
+        for (j = 0; j < N; j++)
+        {
+            int temp = 0;
+            int k;
+            for (k = 0; k < K; k++)
+            {
+                temp += inputA[i * K + k] * inputB[k * N + j];
+            }
+
+            cpuOutput[i * N + j] = temp;
+        }
+    }    
+}
+
+// Naive matmult implementation for comparison with CPU for double data type.
+void 
+doubleMatMultCPU(double *inputA, double *inputB, double *cpuOutput, int M, int N, int K)
+{
+    int i;
+    for (i = 0; i < M; i++)
+    {
+        int j;
+        for (j = 0; j < N; j++)
+        {
+            double temp = 0.0;
+            int k;
+            for (k = 0; k < K; k++)
+            {
+                temp += inputA[i * K + k] * inputB[k * N + j];
+            }
+
+            cpuOutput[i * N + j] = temp;
+        }
+    }    
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// \!brief      Merges sub matrices into final matrix 
+//
+// \!param matrix       final matrix
+// \!param tempOutput   sub matrix 
+// \!param height       height of sub matrix 
+// \!param width        width of sub matrix
+// \!param loopCount    number of sub matrix for any of the input matrix
+// \!param heightOffset the offset of final matrix height, specify where to start copying
+// \!param widthOffset  the offset of final matrix width, specify where to start copying
+////////////////////////////////////////////////////////////////////////////////////////
+
+void 
+copyOutput_float(float* matrix, float* tempOutput, unsigned int height,
+                   unsigned int width, unsigned int loopCount, unsigned int *heightOffset,
+                   unsigned int *widthOffset){
+    unsigned int i = 0;
+    unsigned int j = 0;
+    unsigned int k = 0;
+    unsigned int m = 0;
+    unsigned int N = width * loopCount;
+    
+    j = *heightOffset * N + *widthOffset;
+    while(k < (height * width))
+    {
+        memcpy(&matrix[j],&tempOutput[k], width * sizeof(float));
+        k += width;
+        j += N;
+    }
+    *widthOffset += width;
+    if(*widthOffset == N)
+    {
+        *heightOffset += height;
+        *widthOffset = 0;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// \!brief      Merges sub matrices into final matrix 
+//
+// \!param matrix       final matrix
+// \!param tempOutput   sub matrix 
+// \!param height       height of sub matrix 
+// \!param width        width of sub matrix
+// \!param loopCount    number of sub matrix for any of the input matrix
+// \!param heightOffset the offset of final matrix height, specify where to start copying
+// \!param widthOffset  the offset of final matrix width, specify where to start copying
+////////////////////////////////////////////////////////////////////////////////////////
+
+void 
+copyOutput_int(int* matrix, int* tempOutput, unsigned int height,
+                   unsigned int width, unsigned int loopCount, unsigned int *heightOffset,
+                   unsigned int *widthOffset){
+    unsigned int i = 0;
+    unsigned int j = 0;
+    unsigned int k = 0;
+    unsigned int m = 0;
+    unsigned int N = width * loopCount;
+    
+    j = *heightOffset * N + *widthOffset;
+    while(k < (height * width))
+    {
+        memcpy(&matrix[j],&tempOutput[k], width * sizeof(int));
+        k += width;
+        j += N;
+    }
+    *widthOffset += width;
+    if(*widthOffset == N)
+    {
+        *heightOffset += height;
+        *widthOffset = 0;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// \!brief      Merges sub matrices into final matrix for double data type.
+//
+// \!param matrix       final matrix
+// \!param tempOutput   sub matrix 
+// \!param height       height of sub matrix 
+// \!param width        width of sub matrix
+// \!param loopCount    number of sub matrix for any of the input matrix
+// \!param heightOffset the offset of final matrix height, specify where to start copying
+// \!param widthOffset  the offset of final matrix width, specify where to start copying
+////////////////////////////////////////////////////////////////////////////////////////
+
+void 
+copyOutput_double(double *matrix, double *tempOutput, unsigned int height,
+                   unsigned int width, unsigned int loopCount, unsigned int *heightOffset,
+                   unsigned int *widthOffset){
+    unsigned int i = 0;
+    unsigned int j = 0;
+    unsigned int k = 0;
+    unsigned int m = 0;
+    unsigned int N = width * loopCount;
+    
+    j = *heightOffset * N + *widthOffset;
+    while(k < (height * width))
+    {
+        memcpy(&matrix[j],&tempOutput[k], width * sizeof(double));
+        k += width;
+        j += N;
+    }
+    *widthOffset += width;
+    if(*widthOffset == N)
+    {
+        *heightOffset += height;
+        *widthOffset = 0;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// \!brief      kernel handler function for float data type 
+//
+// \!param finalOutput  final matrix
+// \!param inputA       input matrix A
+// \!param bParts       2D array holds 4 parts of each sub matrix from input matrix B
+// \!param M            height of each sub matrix of A 
+// \!param K            width of each sub matrix A or height of each sub matrix B
+// \!param N            width of each sum matrix B
+// \!param loopCount    number of sub matrix for any of the input matrix
+////////////////////////////////////////////////////////////////////////////////////////
+
+void
+floatKernelHandler(float *finalOutput, float *inputA, float *bParts[MAX_SPLIT][4],
+                        unsigned int M, unsigned int K, unsigned int N, 
+                        unsigned int loopCount){
+    unsigned int dimA1 = M /8;
+    unsigned int dimA2 = K /4;
+    unsigned int dimB1 = K /4;
+    unsigned int dimB2 = N /4;
+    unsigned int dimC1 = dimA1;
+    unsigned int dimC2 = dimB2;
+    
+    unsigned int widthOffset = 0;
+    unsigned int heightOffset = 0;
+    unsigned int heightSplitOffset = 0; 
+    unsigned int i = 0;
+    unsigned int j = 0;
+    
+    float *tempOutput = NULL;
+    
+    float4 A1<dimA1,dimA2>;
+    float4 A2<dimA1,dimA2>;
+    float4 A3<dimA1,dimA2>;
+    float4 A4<dimA1,dimA2>;
+    float4 A5<dimA1,dimA2>;
+    float4 A6<dimA1,dimA2>;
+    float4 A7<dimA1,dimA2>;
+    float4 A8<dimA1,dimA2>;
+    
+    float4 B1<dimB1,dimB2>;
+    float4 B2<dimB1,dimB2>;
+    float4 B3<dimB1,dimB2>;
+    float4 B4<dimB1,dimB2>;
+
+    float4 C1<dimC1,dimC2>;
+    float4 C2<dimC1,dimC2>;
+    float4 C3<dimC1,dimC2>;
+    float4 C4<dimC1,dimC2>;
+    float4 C5<dimC1,dimC2>;
+    float4 C6<dimC1,dimC2>;
+    float4 C7<dimC1,dimC2>;
+    float4 C8<dimC1,dimC2>;
+    
+    if(loopCount > 1)
+    {
+        i = 0;
+        tempOutput = (float *)malloc(sizeof(float)* M * N);
+        while(i < loopCount)
+        {
+            //Read 8 equal parts into A1, A2, A3, A4, A5, A6, A7, A8 respectively
+            streamRead(A1, &inputA[heightSplitOffset]);
+            streamRead(A2, &inputA[heightSplitOffset +(M / 8)* K]);
+            streamRead(A3, &inputA[heightSplitOffset +(M / 8)* 2 * K]);
+            streamRead(A4, &inputA[heightSplitOffset +(M / 8)* 3 * K]);
+            streamRead(A5, &inputA[heightSplitOffset +(M / 8)* 4 * K]);
+            streamRead(A6, &inputA[heightSplitOffset +(M / 8)* 5 * K]);
+            streamRead(A7, &inputA[heightSplitOffset +(M / 8)* 6 * K]);
+            streamRead(A8, &inputA[heightSplitOffset +(M / 8)* 7 * K]);
+
+            //calculate height offset for next sub matrix of inputA 
+            heightSplitOffset += (M * K);                              
+            j = 0;
+            while(j < (loopCount))
+            {
+                // Read 4 equal parts into B1, B2, B3, B4 respectively
+                streamRead(B1, bParts[j][0]);
+                streamRead(B2, bParts[j][1]);
+                streamRead(B3, bParts[j][2]);
+                streamRead(B4, bParts[j][3]);
+
+                // Call the 8 MRT kernel for GPU computation
+                optimized_matmult_float((float)(dimA2), A1,A2,A3,A4,A5,A6,A7,A8, B1,B2,B3,B4, C1,C2,C3,C4,C5,C6,C7,C8);
+
+                // Write the results into a sub resultant matrix
+                streamWrite(C1, &tempOutput[0]);
+                streamWrite(C2, &tempOutput[(M / 8)* N]);
+                streamWrite(C3, &tempOutput[(M / 8)* 2 * N]);
+                streamWrite(C4, &tempOutput[(M / 8)* 3 * N]);
+                streamWrite(C5, &tempOutput[(M / 8)* 4 * N]);
+                streamWrite(C6, &tempOutput[(M / 8)* 5 * N]);
+                streamWrite(C7, &tempOutput[(M / 8)* 6 * N]);
+                streamWrite(C8, &tempOutput[(M / 8)* 7 * N]);
+
+                // Copy results to final matrix
+                copyOutput_float(finalOutput, tempOutput, M, N, loopCount, &widthOffset, &heightOffset);
+                j++;
+            }
+            i++;
+        }
+        free(tempOutput);
+    }
+    else
+    {
+        // Read 8 equal parts into A1, A2, A3, A4, A5, A6, A7, A8 respectively
+        streamRead(A1, &inputA[0]);
+        streamRead(A2, &inputA[M / 8 * K]);
+        streamRead(A3, &inputA[M / 8 * 2 * K]);
+        streamRead(A4, &inputA[M / 8 * 3 * K]);
+        streamRead(A5, &inputA[M / 8 * 4 * K]);
+        streamRead(A6, &inputA[M / 8 * 5 * K]);
+        streamRead(A7, &inputA[M / 8 * 6 * K]);
+        streamRead(A8, &inputA[M / 8 * 7 * K]);
+
+        // Read 4 equal parts into B1, B2, B3, B4 respectively
+        streamRead(B1, bParts[0][0]);
+        streamRead(B2, bParts[0][1]);
+        streamRead(B3, bParts[0][2]);
+        streamRead(B4, bParts[0][3]);
+
+        // Call the 8 MRT kernel for GPU computation
+        optimized_matmult_float((float)(dimA2), A1,A2,A3,A4,A5,A6,A7,A8, B1,B2,B3,B4, C1,C2,C3,C4,C5,C6,C7,C8);
+
+        // Write the results into a final output matrix
+        streamWrite(C1, &finalOutput[0]);
+        streamWrite(C2, &finalOutput[(M / 8)* N]);
+        streamWrite(C3, &finalOutput[(M / 8)* 2 * N]);
+        streamWrite(C4, &finalOutput[(M / 8)* 3 * N]);
+        streamWrite(C5, &finalOutput[(M / 8)* 4 * N]);
+        streamWrite(C6, &finalOutput[(M / 8)* 5 * N]);
+        streamWrite(C7, &finalOutput[(M / 8)* 6 * N]);
+        streamWrite(C8, &finalOutput[(M / 8)* 7 * N]);      
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// \!brief      kernel handler function for integer data type 
+//
+// \!param finalOutput  final matrix
+// \!param inputA       input matrix A
+// \!param bParts       2D array holds 4 parts of each sub matrix from input matrix B
+// \!param M            height of each sub matrix of A 
+// \!param K            width of each sub matrix A or height of each sub matrix B
+// \!param N            width of each sum matrix B
+// \!param loopCount    number of sub matrix for any of the input matrix
+////////////////////////////////////////////////////////////////////////////////////////
+
+void
+intKernelHandler(int *finalOutput, int *inputA, int *bParts[MAX_SPLIT][4],
+                        unsigned int M, unsigned int K, unsigned int N, 
+                        unsigned int loopCount){
+    unsigned int dimA1 = M /8;
+    unsigned int dimA2 = K /4;
+    unsigned int dimB1 = K /4;
+    unsigned int dimB2 = N /4;
+    unsigned int dimC1 = dimA1;
+    unsigned int dimC2 = dimB2;
+    
+    unsigned int widthOffset = 0;
+    unsigned int heightOffset = 0;
+    unsigned int heightSplitOffset = 0; 
+    unsigned int i = 0;
+    unsigned int j = 0;
+    
+    int *tempOutput = NULL;
+    
+    int4 A1<dimA1,dimA2>;
+    int4 A2<dimA1,dimA2>;
+    int4 A3<dimA1,dimA2>;
+    int4 A4<dimA1,dimA2>;
+    int4 A5<dimA1,dimA2>;
+    int4 A6<dimA1,dimA2>;
+    int4 A7<dimA1,dimA2>;
+    int4 A8<dimA1,dimA2>;
+    
+    int4 B1<dimB1,dimB2>;
+    int4 B2<dimB1,dimB2>;
+    int4 B3<dimB1,dimB2>;
+    int4 B4<dimB1,dimB2>;
+
+    int4 C1<dimC1,dimC2>;
+    int4 C2<dimC1,dimC2>;
+    int4 C3<dimC1,dimC2>;
+    int4 C4<dimC1,dimC2>;
+    int4 C5<dimC1,dimC2>;
+    int4 C6<dimC1,dimC2>;
+    int4 C7<dimC1,dimC2>;
+    int4 C8<dimC1,dimC2>;
+    
+    if(loopCount > 1)
+    {
+        i = 0;
+        tempOutput = (int *)malloc(sizeof(int)* M * N);
+        while(i < loopCount)
+        {
+            //Read 8 equal parts into A1, A2, A3, A4, A5, A6, A7, A8 respectively
+            streamRead(A1, &inputA[heightSplitOffset]);
+            streamRead(A2, &inputA[heightSplitOffset +(M / 8)* K]);
+            streamRead(A3, &inputA[heightSplitOffset +(M / 8)* 2 * K]);
+            streamRead(A4, &inputA[heightSplitOffset +(M / 8)* 3 * K]);
+            streamRead(A5, &inputA[heightSplitOffset +(M / 8)* 4 * K]);
+            streamRead(A6, &inputA[heightSplitOffset +(M / 8)* 5 * K]);
+            streamRead(A7, &inputA[heightSplitOffset +(M / 8)* 6 * K]);
+            streamRead(A8, &inputA[heightSplitOffset +(M / 8)* 7 * K]);
+            //calculate height offset for next sub matrix of inputA 
+            heightSplitOffset += (M * K);                              
+            j = 0;
+            while(j < (loopCount))
+            {
+                // Read 4 equal parts into B1, B2, B3, B4 respectively
+                streamRead(B1, bParts[j][0]);
+                streamRead(B2, bParts[j][1]);
+                streamRead(B3, bParts[j][2]);
+                streamRead(B4, bParts[j][3]);
+
+                // Call the 8 MRT kernel for GPU computation
+                optimized_matmult_int(dimA2, A1,A2,A3,A4,A5,A6,A7,A8, B1,B2,B3,B4, C1,C2,C3,C4,C5,C6,C7,C8);
+                
+                // Write the results into a sub resultant matrix
+                streamWrite(C1, &tempOutput[0]);
+                streamWrite(C2, &tempOutput[(M / 8)* N]);
+                streamWrite(C3, &tempOutput[(M / 8)* 2 * N]);
+                streamWrite(C4, &tempOutput[(M / 8)* 3 * N]);
+                streamWrite(C5, &tempOutput[(M / 8)* 4 * N]);
+                streamWrite(C6, &tempOutput[(M / 8)* 5 * N]);
+                streamWrite(C7, &tempOutput[(M / 8)* 6 * N]);
+                streamWrite(C8, &tempOutput[(M / 8)* 7 * N]);
+                
+                // Copy results to final matrix
+                copyOutput_int(finalOutput, tempOutput, M, N, loopCount, &widthOffset, &heightOffset);
+                j++;
+            }
+            i++;
+        }
+        free(tempOutput);
+    }
+    else
+    {
+        // Read 8 equal parts into A1, A2, A3, A4, A5, A6, A7, A8 respectively
+        streamRead(A1, &inputA[0]);
+        streamRead(A2, &inputA[M / 8 * K]);
+        streamRead(A3, &inputA[M / 8 * 2 * K]);
+        streamRead(A4, &inputA[M / 8 * 3 * K]);
+        streamRead(A5, &inputA[M / 8 * 4 * K]);
+        streamRead(A6, &inputA[M / 8 * 5 * K]);
+        streamRead(A7, &inputA[M / 8 * 6 * K]);
+        streamRead(A8, &inputA[M / 8 * 7 * K]);
+        
+        // Read 4 equal parts into B1, B2, B3, B4 respectively
+        streamRead(B1, bParts[0][0]);
+        streamRead(B2, bParts[0][1]);
+        streamRead(B3, bParts[0][2]);
+        streamRead(B4, bParts[0][3]);
+        
+        // Call the 8 MRT kernel for GPU computation
+        optimized_matmult_int(dimA2, A1,A2,A3,A4,A5,A6,A7,A8, B1,B2,B3,B4, C1,C2,C3,C4,C5,C6,C7,C8);
+        
+        // Write the results into a final output matrix
+        streamWrite(C1, &finalOutput[0]);
+        streamWrite(C2, &finalOutput[(M / 8)* N]);
+        streamWrite(C3, &finalOutput[(M / 8)* 2 * N]);
+        streamWrite(C4, &finalOutput[(M / 8)* 3 * N]);
+        streamWrite(C5, &finalOutput[(M / 8)* 4 * N]);
+        streamWrite(C6, &finalOutput[(M / 8)* 5 * N]);
+        streamWrite(C7, &finalOutput[(M / 8)* 6 * N]);
+        streamWrite(C8, &finalOutput[(M / 8)* 7 * N]);      
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// \!brief      kernel handler function for double data type 
+//
+// \!param finalOutput  final matrix
+// \!param inputA       input matrix A
+// \!param bParts       2D array holds 4 parts of each sub matrix from input matrix B
+// \!param M            height of each sub matrix of A 
+// \!param K            width of each sub matrix A or height of each sub matrix B
+// \!param N            width of each sum matrix B
+// \!param loopCount    number of sub matrix for any of the input matrix
+////////////////////////////////////////////////////////////////////////////////////////
+
+void
+doubleKernelHandler(double *finalOutput, double *inputA, double *bParts[MAX_SPLIT][4],
+                        unsigned int M, unsigned int K, unsigned int N, 
+                        unsigned int loopCount){
+    unsigned int dimA1 = M /8;
+    unsigned int dimA2 = K /2;
+    unsigned int dimB1 = K /2;
+    unsigned int dimB2 = N /2;
+    unsigned int dimC1 = dimA1;
+    unsigned int dimC2 = dimB2;
+    
+    unsigned int widthOffset = 0;
+    unsigned int heightOffset = 0;
+    unsigned int heightSplitOffset = 0; 
+    unsigned int i = 0;
+    unsigned int j = 0;
+    
+    double *tempOutput = NULL;
+    
+    double2 A1<dimA1,dimA2>;
+    double2 A2<dimA1,dimA2>;
+    double2 A3<dimA1,dimA2>;
+    double2 A4<dimA1,dimA2>;
+    double2 A5<dimA1,dimA2>;
+    double2 A6<dimA1,dimA2>;
+    double2 A7<dimA1,dimA2>;
+    double2 A8<dimA1,dimA2>;
+    
+    double2 B1<dimB1,dimB2>;
+    double2 B2<dimB1,dimB2>;
+
+    double2 C1<dimC1,dimC2>;
+    double2 C2<dimC1,dimC2>;
+    double2 C3<dimC1,dimC2>;
+    double2 C4<dimC1,dimC2>;
+    double2 C5<dimC1,dimC2>;
+    double2 C6<dimC1,dimC2>;
+    double2 C7<dimC1,dimC2>;
+    double2 C8<dimC1,dimC2>;
+    
+    if(loopCount > 1)
+    {
+        i = 0;
+        tempOutput = (double *)malloc(sizeof(double)* M * N);
+        while(i < loopCount)
+        {
+            //Read 8 equal parts into A1, A2, A3, A4, A5, A6, A7, A8 respectively
+            streamRead(A1, &inputA[heightSplitOffset]);
+            streamRead(A2, &inputA[heightSplitOffset +(M / 8)* K]);
+            streamRead(A3, &inputA[heightSplitOffset +(M / 8)* 2 * K]);
+            streamRead(A4, &inputA[heightSplitOffset +(M / 8)* 3 * K]);
+            streamRead(A5, &inputA[heightSplitOffset +(M / 8)* 4 * K]);
+            streamRead(A6, &inputA[heightSplitOffset +(M / 8)* 5 * K]);
+            streamRead(A7, &inputA[heightSplitOffset +(M / 8)* 6 * K]);
+            streamRead(A8, &inputA[heightSplitOffset +(M / 8)* 7 * K]);
+
+            //calculate height offset for next sub matrix of inputA 
+            heightSplitOffset += (M * K);                              
+            j = 0;
+            while(j < (loopCount))
+            {
+                // Read 4 equal parts into B1, B2, B3, B4 respectively
+                streamRead(B1, bParts[j][0]);
+                streamRead(B2, bParts[j][1]);
+
+                // Call the 8 MRT kernel for GPU computation
+                optimized_matmult_double((float)dimA2, A1,A2,A3,A4,A5,A6,A7,A8, B1,B2, C1,C2,C3,C4,C5,C6,C7,C8);
+
+                // Write the results into a sub resultant matrix
+                streamWrite(C1, &tempOutput[0]);
+                streamWrite(C2, &tempOutput[(M / 8)* N]);
+                streamWrite(C3, &tempOutput[(M / 8)* 2 * N]);
+                streamWrite(C4, &tempOutput[(M / 8)* 3 * N]);
+                streamWrite(C5, &tempOutput[(M / 8)* 4 * N]);
+                streamWrite(C6, &tempOutput[(M / 8)* 5 * N]);
+                streamWrite(C7, &tempOutput[(M / 8)* 6 * N]);
+                streamWrite(C8, &tempOutput[(M / 8)* 7 * N]);
+
+                // Copy results to final matrix
+                copyOutput_double(finalOutput, tempOutput, M, N, loopCount, &widthOffset, &heightOffset);
+                j++;
+            }
+            i++;
+        }
+        free(tempOutput);
+    }
+    else
+    {
+        // Read 8 equal parts into A1, A2, A3, A4, A5, A6, A7, A8 respectively
+        streamRead(A1, &inputA[0]);
+        streamRead(A2, &inputA[M / 8 * K]);
+        streamRead(A3, &inputA[M / 8 * 2 * K]);
+        streamRead(A4, &inputA[M / 8 * 3 * K]);
+        streamRead(A5, &inputA[M / 8 * 4 * K]);
+        streamRead(A6, &inputA[M / 8 * 5 * K]);
+        streamRead(A7, &inputA[M / 8 * 6 * K]);
+        streamRead(A8, &inputA[M / 8 * 7 * K]);
+
+        // Read 4 equal parts into B1, B2, B3, B4 respectively
+        streamRead(B1, bParts[0][0]);
+        streamRead(B2, bParts[0][1]);
+
+        // Call the 8 MRT kernel for GPU computation
+        optimized_matmult_double((float)dimA2, A1,A2,A3,A4,A5,A6,A7,A8, B1,B2, C1,C2,C3,C4,C5,C6,C7,C8);
+
+        // Write the results into a final output matrix
+        streamWrite(C1, &finalOutput[0]);
+        
+        streamWrite(C2, &finalOutput[(M / 8)* N]);
+        streamWrite(C3, &finalOutput[(M / 8)* 2 * N]);
+        streamWrite(C4, &finalOutput[(M / 8)* 3 * N]);
+        streamWrite(C5, &finalOutput[(M / 8)* 4 * N]);
+        streamWrite(C6, &finalOutput[(M / 8)* 5 * N]);
+        streamWrite(C7, &finalOutput[(M / 8)* 6 * N]);
+        streamWrite(C8, &finalOutput[(M / 8)* 7 * N]);
+    }
+}

@@ -1,0 +1,291 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file accumulate.br
+  \brief Brook test for read-modify-write
+
+  This test repeatedly computes b += a for two different streams. 
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+static int retval = 0;
+
+/**
+ *
+ * \brief		Simple Brook kernel to sum two streams
+ *
+ * \param a		Input stream
+ * \param b		Input stream
+ * \param c		Output stream containing sum of inputs
+ *						
+ */
+kernel void sum(float a<>, float b<>, out float c<>)
+{
+    c = a + b;
+}
+
+/**
+ *
+ * \brief				Compute elementwise sum of two 2D arrays
+ *
+ * \param a				Input array
+ * \param b				Input array
+ * \param c				Array of sums 
+ * \param Height		Number of rows in arrays
+ * \param Width			Number of columns in arrays
+ *						
+ */
+void sum_cpu(float* a, float* b, float* c, int Height, int Width)
+{
+    int i = 0;
+    for (i = 0; i < Height; ++i)
+    {
+        int j;
+        for (j = 0; j < Width; ++j)
+        {
+            c[i * Width + j] = b[i * Width + j] + a[i * Width + j];
+        }
+    }
+}
+
+int main(int argc, char** argv)
+{
+    float *input[4]  = {NULL};
+    float *output[2] = {NULL};
+	float readback = 0;
+    unsigned int i,j;
+    struct infoRec cmd;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+
+	/////////////////////////////////////////////////////////////////////////
+	// Allocate memory
+	/////////////////////////////////////////////////////////////////////////
+	for(i = 0; i < 4; ++i)
+    {
+        if (!(input[i] = allocate_mat_f(cmd.Height, cmd.Width)))
+        {
+            retval = -1;
+            goto cleanup;
+        }
+        fill_mat_f((float*)input[i], cmd.Height, cmd.Width, 1, RANDOM);
+    }
+    for (i = 0; i < 2; ++i)
+    {
+        if (!(output[i] = allocate_mat_f(cmd.Height, cmd.Width)))
+        {
+            retval = -1;
+            goto cleanup;
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print input data
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        for (i = 0; i < 2; ++i)
+        {
+            char buffer[20];
+            sprintf(buffer,"Input Matrix %d:",i);
+            print_mat_f(buffer, "%2.5lf ",(float*)input[i] , cmd.Height, cmd.Width);
+        }
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        for (i = 0; i < 2; ++i)
+        {
+            char buffer[20];
+            sprintf(buffer,"Input Matrix %d:",i);
+            print_mat_f(buffer, "%2.5lf ",(float*)input[i] , 1, cmd.Width);
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+    // Brook code block
+	/////////////////////////////////////////////////////////////////////////
+    {
+        int Length = cmd.Height * cmd.Width;
+        int Width = cmd.Width;
+        int Height = cmd.Height;
+        float a1<Length>, b1<Length>, c1<Length>;
+        float a2<Height, Width>, b2<Height, Width>, c2<Height, Width>;
+        
+		// Record GPU Total Time 
+		Start(0);
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+			// Write to stream 
+			streamRead(a1, input[0]);
+			streamRead(a2, input[0]);
+			streamRead(b1, input[1]);
+			streamRead(b2, input[1]);
+
+			for(j=0; j<8; j++)
+			{
+				// Run the brook program 
+				// Ping pong between two buffers
+				// b1 and c2 for 1D, b2 and c2 for 2D
+				if(j%2 == 0)
+				{
+					sum(a1, b1, c1);
+					sum(a2, b2, c2);
+				}
+				else
+				{
+					sum(a1, c1, b1);
+					sum(a2, c2, b2);
+				}
+			}
+
+			// Write data back from stream 
+			streamWrite(b1, output[0]);
+			streamWrite(b2, output[1]);
+        }
+        Stop(0);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print results if requested
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        for (i = 0; i < 2; ++i)
+        {
+            char buffer[20];
+            sprintf(buffer,"Output Matrix %d:",i);
+            print_mat_f(buffer, "%6.2lf ",(float*)output[i], 
+						cmd.Height, cmd.Width);
+        }
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing first row of data, for more use -v\n");
+        for (i = 0; i < 2; ++i)
+        {
+            char buffer[20];
+            sprintf(buffer,"Output Matrix %d:",i);
+            print_mat_f(buffer, "%6.2lf ",(float*)output[i], 1, cmd.Width);
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested
+	/////////////////////////////////////////////////////////////////////////
+	if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time");
+		printf( "%-8d%-8d%-16d%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        int res = 0;
+
+		printf("-e Verify correct output.\n");
+		printf("Performing accumulate on CPU ... ");
+
+        sum_cpu(input[0], input[1], input[2], cmd.Height, cmd.Width);
+        sum_cpu(input[0], input[1], input[3], cmd.Height, cmd.Width);
+        
+		for (i = 1; i < 8; ++i)
+        {
+            sum_cpu(input[0], input[2], input[2], cmd.Height, cmd.Width);
+            sum_cpu(input[0], input[3], input[3], cmd.Height, cmd.Width);
+        }
+
+		printf("Done\n");
+
+		// Compare CPU and GPU results for correctness
+        res += compare_mat_f(input[2], (float*)output[0], cmd.Height, cmd.Width);
+        res += compare_mat_f(input[3], (float*)output[1], cmd.Height, cmd.Width);
+        if (res)
+        {
+            printf("%s: Failed!\n\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n\n", argv[0]);
+            retval = 0;
+        }
+
+	}
+
+	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+	/////////////////////////////////////////////////////////////////////////
+cleanup:
+    for (i = 0; i < 4; ++i)
+    {
+        if (input[i])
+        {
+            free(input[i]);
+        }
+    }
+    for (i = 0; i < 2; ++i)
+    {
+        if (output[i])
+        {
+            free(output[i]);
+        }
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+    return retval;
+}

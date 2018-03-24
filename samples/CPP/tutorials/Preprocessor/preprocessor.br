@@ -1,0 +1,31 @@
+kernel int multiply(int a, int b)
+{
+	return a * b;
+}
+
+#define TWO
+
+kernel
+void sample1(int a, int b, int i0<>, out int o0<>)
+{
+    int temp = 0;
+#ifdef ONE
+    #ifdef TWO
+        temp = a + a;
+        o0 = i0 + multiply(temp, b) ;
+    #else
+	    temp = b + b;
+        o0 = i0 + multiply(temp, b) ;
+    #endif
+#else
+    #undef TWO
+    #ifdef TWO
+        temp = a + a;
+        o0 = i0 + multiply(a, temp) ;
+    #else
+	    temp = b + b;
+        o0 = i0 + multiply(a, temp) ;
+    #endif
+#endif
+}
+

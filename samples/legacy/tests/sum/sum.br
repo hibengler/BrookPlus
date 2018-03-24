@@ -1,0 +1,301 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+ ****************************************************************************/
+/*****************************************************************************
+  \file sum.br
+  \brief A brook test of a basic kernel with streams
+
+  This test is used to confirm that a kernel works on either a one dimension
+  or a two dimension stream. The test takes two streams, adds the values 
+  together and outputs to a third stream.
+ ****************************************************************************/
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+static int retval = 0;
+
+/**
+ * \param a<> The a matrix stream
+ * \param b<> The b matrix stream
+ * \param c<> The c matrix stream
+ * \return void
+ * \brief Brook kernel that stream computes c = a + b
+ *
+ * Computes at each location of the streams the summation a + b and
+ * stores it in the output stream c
+ */
+kernel void sum(float a<>, float b<>, out float c<>)
+{
+    c = a + b;
+}
+
+/**
+ * \param input1 The first input matrix
+ * \param input2 The second input matrix
+ * \param results The matrix that holds the results
+ * \param height The height of the matrices
+ * \param width The width of the matrices
+ * \brief C = A + B
+ * \return void
+ *
+ * \i sum_cpu loops does two matrix addition and stores the results in the
+ * C matrix.
+ *
+ * \sa sum
+ */
+void sum_cpu(const float* input1, const float* input2, float* results, int height, int width)
+{
+    int y;
+    for (y = 0; y < height; ++y)
+    {
+        int x;
+        for (x = 0; x < width; ++x)
+        {
+            int index = y * width + x;
+            results[index] = input1[index] + input2[index];
+        }
+    }
+}
+
+int main(int argc, char** argv)
+{
+    float *d1Input[2] = {NULL};
+    float *d2Input[2] = {NULL};
+    float *d1Output   =  NULL;
+    float *d2Output   =  NULL;
+    float *cpuOutput  = NULL;
+    float *cpuOutput2 = NULL;
+    unsigned int i = 0; 
+    unsigned int Height, Width, Length;
+    struct infoRec cmd; 
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+    Height = cmd.Height;
+    Width = cmd.Width;
+    Length = Height * Width;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Allocate memory
+   	/////////////////////////////////////////////////////////////////////////
+    if (!(d1Output = allocate_mat_f(1, Length)))
+    {
+        retval = -1;
+        goto cleanup;
+    }
+    if (!(d2Output = allocate_mat_f(Height, Width)))
+    {
+        retval = -1;
+        goto cleanup;
+    }
+    for (i = 0; i < 2; ++i)
+    {
+        char buffer[40];
+        d1Input[i] = allocate_mat_f(1, Length);
+        d2Input[i] = allocate_mat_f(Height, Width);
+        if (!d1Input[i] || !d2Input[i])
+        {
+            retval = -1;
+            goto cleanup;
+        }
+        // Randomly fill the input matrices with data
+        fill_mat_f((float*)d2Input[i], Height, Width, Length, RANDOM);
+        fill_mat_f(d1Input[i], 1, Length, Length, RANDOM);
+
+		/////////////////////////////////////////////////////////////////////////
+		// Print input data 
+   		/////////////////////////////////////////////////////////////////////////
+        if (cmd.Verbose)
+        {
+            sprintf(buffer,"Input 2D Matrix %d:", i);
+            print_mat_f(buffer, "%2.5lf ", (float*)d2Input[i], Height, Width);
+            sprintf(buffer,"Input 1D Matrix %d:", i);
+            print_mat_f(buffer, "%2.5lf ", d1Input[i], Height, Width);
+        } 
+        else if (!cmd.Quiet)
+        {
+            printf("Printing the first row, use -v for more.\n");
+            sprintf(buffer,"Input 2D Matrix %d:", i);
+            print_mat_f(buffer, "%2.5lf ", (float*)d2Input[i], 1, Width);
+            sprintf(buffer,"Input 1D Matrix %d:", i);
+            print_mat_f(buffer, "%2.5lf ", d1Input[i], 1, Width);
+        }
+
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Brook code block
+   	/////////////////////////////////////////////////////////////////////////
+    {
+        float d1ArrayA< Length >;
+        float d1ArrayB< Length >;
+        float d1ArrayC< Length >;
+        float d2ArrayA< Height, Width>;
+        float d2ArrayB< Height, Width>;
+        float d2ArrayC< Height, Width>;
+
+		// Record GPU Total time
+        Start(0);
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+			// Write data to streams 
+			streamRead(d1ArrayA, d1Input[0]);
+			streamRead(d1ArrayB, d1Input[1]);
+			streamRead(d2ArrayA, d2Input[0]);
+			streamRead(d2ArrayB, d2Input[1]);
+
+			// Run Brook program
+			sum(d1ArrayA, d1ArrayB, d1ArrayC);
+			sum(d2ArrayA, d2ArrayB, d2ArrayC);
+
+			// Write data from streams 
+			streamWrite(d1ArrayC, d1Output);
+			streamWrite(d2ArrayC, d2Output);
+        }
+        Stop(0);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Print results if requested
+   	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verbose)
+    {
+        print_mat_f("1D Output: ", "%2.5lf ", d1Output, 1, Length);
+        print_mat_f("2D Output: ", "%2.5lf ", (float*)d2Output, Height, Width);
+    }
+    else if (!cmd.Quiet)
+    {
+        printf("Printing out first row of output, use -v for more info.\n");
+        print_mat_f("1D Output: ", "%2.5lf ", d1Output, 1, Width);
+        print_mat_f("2D Output: ", "%2.5lf ", (float*)d2Output, 1, Width);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time");
+		printf( "%-8d%-8d%-16d%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time);
+		printf("\n\n");
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        int res = 0;
+        if (!(cpuOutput = allocate_mat_f(1, Length)))
+        {
+            retval = -1;
+            goto cpu_cleanup;
+        }
+        if (!(cpuOutput2 = allocate_mat_f(Height, Width)))
+        {
+            retval = -1;
+            goto cpu_cleanup;
+        }
+
+		printf("-e Verify correct output.\n");
+
+        sum_cpu(d1Input[0], d1Input[1], cpuOutput, 1, Length);
+        sum_cpu((float*)d2Input[0], (float*)d2Input[1], (float*)cpuOutput2, Height, Width);
+        res += compare_mat_f(cpuOutput, d1Output, 1, Length);
+        res += compare_mat_f((float*) cpuOutput2, (float*)d2Output, Height, Width);
+
+        if(res)
+        {
+            printf("%s: Failed!\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+            retval = 0;
+        }
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+   	/////////////////////////////////////////////////////////////////////////
+cpu_cleanup:
+        if (cpuOutput)
+        {
+            free(cpuOutput);
+        }
+        if (cpuOutput2)
+        {
+            free(cpuOutput2);
+        }
+cleanup:
+    for (i = 0; i < 2; ++i)
+    {
+        if (d1Input[i])
+        {
+            free(d1Input[i]);
+        }
+        if (d2Input[i])
+        {
+            free(d2Input[i]);
+        }
+    }
+    if (d1Output)
+    {
+        free(d1Output);
+    }
+    if (d2Output)
+    {
+        free(d2Output);
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+	return retval;
+}

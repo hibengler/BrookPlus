@@ -1,0 +1,688 @@
+/****************************************************************************
+
+Copyright (c) 2003, Stanford University
+All rights reserved.
+
+Copyright (c) 2007, Advanced Micro Devices, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of Stanford University nor the names of any contributors 
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+ 
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+****************************************************************************/
+/*****************************************************************************
+  \file conjugate_gradient.br
+  \brief A conjugate gradient solver written in brook
+
+  Conjugate Gradient (CG) Solver for Ax = b.
+
+  The conjugate method is used to solve large systems of equations
+  where A is sparse and symmetric positive definite.  For a description
+  of the technique, see "Matrix Computations", by Golub and Van Loan.
+
+  Note: see the example app spMatrixVec for a description of how the
+  sparse matrix A is represented for streaming, and how the matrix-vector
+  product is performed.
+
+
+ ****************************************************************************/
+
+#include "common.h"
+#include "Timer.h"
+#include <stdio.h>
+
+
+static int retval = 0;
+static float Epsilon = 0.000001f;
+static float convergeIterations = 100.0f;
+
+/** 
+ *
+ * \brief			Simple componentwise 
+ *					multiplication kernel 
+ *					c = a * b 
+ *					
+ * \param a			Input stream operand
+ * \param b			Input stream operand
+ * \param c			Output stream 
+ *
+*/
+kernel void mult(float a<>, float b<>, out float c<>)
+{
+    c = a * b;
+}
+
+/** 
+ *
+ * \brief			Kernel to componentwise square
+ *					each element of the input stream
+ *					
+ * \param a			Input stream
+ * \param b			Output stream 
+ *
+*/
+kernel void square(float a<>, out float b<>)
+{
+    b = a * a;
+}
+
+/** 
+ *
+ * \brief			Sparse Matrix Multiplication Kernel
+ *					
+ * \param index		Indices for sparse matrix
+ * \param x			Sparse matrix vector
+ * \param A			Dense matrix vector
+ * \param result	Product vector
+ *
+*/
+kernel void sparse_matmult_product(float index<>, float x[][], float A<>, out float result<>)
+{
+    float2 index1 = float2(index, index);
+    result = x[index1.y][index1.x] * A;
+}
+
+
+/** 
+ *
+ * \brief			Subtraction kernel 
+ *					c = a - b
+ *					
+ * \param a			Input stream operand
+ * \param b			Input stream operand
+ * \param c			Output stream 
+ *
+*/
+kernel void subtract(float a<>, float b<>, out float c<>)
+{
+    c = a - b;
+}
+
+/** 
+ *
+ * \brief			Copy Kernel
+ *					
+ * \param a			Input stream
+ * \param b			Output stream 
+ *
+*/
+kernel void copy(float a<>, out float b<>)
+{
+    b = a;
+}
+
+/** 
+ *
+ * \brief			Reduction kernel for addition 
+ *					
+ * \param a			Input stream
+ * \param result	Output stream of sums
+ *
+*/
+reduce void sum(float a<>, reduce float result<>)
+{
+    result += a;
+}
+
+/** 
+ *
+ * \brief			Computes a scaled addition of two streams.
+ *					
+ * \param x			Input stream
+ * \param y			Input stream
+ * \param a			Scaling factor
+ * \param z			Ouput stream 
+ *
+*/
+kernel void scaleAdd(float x<>, float y<>, float a, out float z<>)
+{
+    z = x + (y * a);
+}
+
+/** 
+ *
+ * \brief			Create a random symmetric positive definite matrix.
+ *					Start by creating a random matrix which has atmost 
+ *					5 non zero elements in each row. Make it symmetrix 
+ *					by adding its transpose. Ensure the diagonal element 
+ *					is larger than the sum of all the elements in its row.
+ *
+ * \param A			Square matrix 
+ * \param size		Dimensions of A
+ * \param ngWidth	Number of non-zero elements allowed in a row
+ *
+*/
+void createSymmetrixPositiveDefiniteMatrix(float *matrixA, unsigned int size, unsigned int nzWidth)
+{
+    unsigned int n;
+    unsigned int i, j;
+    unsigned int k;
+    float sum;
+
+    // Initialize matrix A to all zeros.
+    fill_mat_f((float*)matrixA, size, size, 1, ZERO);
+
+    // Create partially filled random matrix A
+    // Each row can have a max nzWidth non zero elements.
+    // We allow only nzWidth/2 non zero elmenets to account for the fact that 
+    // when adding with the transpose, we may get an additional nzWidth/2 non zero elements.
+    for (i=0; i < size; i++) 
+    {
+        matrixA[i * size + i] = 1.0f * (rand() % size + 1);    // ensure the diagoal is defined with some random number
+        n = rand() % (nzWidth/2);     // chose a random number between 0 & nzWidth/2.
+        for (k=0; k < n; k++) 
+        {
+            j = rand() % size;          // write to some random column other than diagonal a random value.
+            if (i != j) 
+                matrixA[i * size + j] = (float) (rand() % 10) / 10.0f;
+        }
+    }
+
+    // Add with transpose to make it symmetric.
+    for (i = 0; i < size; i++)
+        for (j=i; j < size; j++)
+        {
+            matrixA[i * size + j] += matrixA[j * size + i];
+            matrixA[j * size + i] = matrixA[i * size + j];
+        }
+
+
+    // Ensure diagonal value is > sum of other values in its row.
+    for (i = 0; i < size; i++)
+    {
+        sum = 0;
+        for (j=0; j < size; j++)
+        {
+            if (i!= j) sum += matrixA[i * size + j];
+        }
+        matrixA[i * size + i] += sum;  
+    }
+}
+
+/**
+ *
+ * \brief					Create Compressed Sparse Row (CSR) represenation 
+ *							and store in csrNz, csrCols, csrRowStart.
+ * \param matrixA			A square sparse matrix
+ * \param csrNz				Non-zero elements of matrixA
+ * \param csrCols			The columns array for the CSR format 
+ * \param csrRowStart		Row index array for the CSR format
+ * \param size				Size of the sparse matrix
+ * \param length			Length of csrNz and csrCols
+ *
+*/
+void createCSRFromSparseMatrix(float* matrixA, float* csrNz, int* csrCols, int* csrRowStart, unsigned int size, unsigned int length)
+{
+    unsigned int i, j, k;
+    int count;
+
+    for (i=0; i < length; i++)
+    {
+        csrNz[i] = 0;
+        csrCols[i] = 0;
+    }
+
+    csrRowStart[0] = 0;
+    k = 0;
+    for (i=0; i < size; i++) 
+    {
+        count = 0;
+        for (j=0; j < size; j++) 
+        {
+            if (matrixA[i * size + j] != 0) 
+            { 
+                count++; 
+                csrCols[k] = j;
+                csrNz[k] = matrixA[i * size + j];
+                k++;
+                assert (k < length);
+            }
+        }
+        csrRowStart[i+1] = csrRowStart[i] + count;
+    }
+}
+
+
+/**
+ *
+ * \brief	Convert the CSR format into the padded ITPACK
+ *			representation that is easy to stream.
+ *
+*/
+void reshuffleData(float* csrNz, int* csrCols, int* csrRowStart, float* Anz, float* Acols, unsigned int size, unsigned int nzWidth) 
+{
+    unsigned int i;
+    int j;
+
+    for (i = 0; i < size; i++) 
+    {
+        unsigned int offset = 0;
+
+        for (j = csrRowStart[i]; j < csrRowStart[i + 1]; j++) 
+        {
+            Anz[nzWidth * i + offset] = csrNz[j];
+            Acols[nzWidth * i + offset] = (float)csrCols[j];
+            offset++;
+        }
+
+        // must pad the rest of the row
+        while (offset < nzWidth)
+        {
+            Anz[nzWidth * i + offset] = 0.0f;
+            Acols[nzWidth * i + offset] = (float)0.0f;   // this should be an invalid index.... but doesn't have to be since x multiplied by a zero here
+            offset++;
+        }
+    }
+}
+
+
+
+int main(int argc, char** argv)
+{
+    unsigned int i      = 0;
+    unsigned int j      = 0;
+
+    unsigned int Length = 0;
+    unsigned int Size   = 0;
+    unsigned int NzWidth  = 2;    // Defined a value that is the maximum number of non zero elements in each row of matrix A.
+                                  // Note: This is not the width of matrix A, matrix A is of dimensions Size x Size
+                                  // nzWidth must be >= 2.
+    float resNew = 0.0f;
+    float resOld = 0.0f;
+    float alpha  = 0.0f;
+    float convergeThresh = 0.0f;
+
+    float  *Anz     = NULL;
+    float  *cIdx    = NULL;
+    float  *x       = NULL;
+    float  *b       = NULL;
+    float  *bdash   = NULL;
+    float  *error   = NULL;
+    float  *matrixA = NULL;
+
+
+    // compressed sparse column representation of A, will be converted to ITPACK format
+    // for streaming
+    float  *csrNz       = NULL;
+    int    *csrCols     = NULL;
+    int    *csrRowStart = NULL;
+    struct infoRec cmd;
+
+	/////////////////////////////////////////////////////////////////////////
+    // Setup the timers 
+	// 0 = GPU Total Time
+	// 1 = GPU Compute Time
+	// 2 = CPU Total Time
+	/////////////////////////////////////////////////////////////////////////
+    Setup(0);
+    Setup(1);
+    Setup(2);
+
+    ParseCommandLine(argc, argv, &cmd);
+    srand(cmd.Seed);
+
+    if (cmd.Width  < 2 || cmd.Height < 2)
+    {
+        if (!cmd.Quiet)
+        {
+            fprintf(stderr, "Error: Size must be larger than 2.\n");
+        }
+        else
+        {
+            printf("%s: Passed!\n", argv[0]);
+        }
+        return retval;
+    }
+
+    Size = cmd.Height;
+    if (cmd.Width  != cmd.Height)
+    {
+        Size = cmd.Width < cmd.Height ? cmd.Width : cmd.Height;
+        if (!cmd.Quiet)
+        {
+            fprintf(stderr, "Warning: Matrix must be square, using Size = %d\n", Size);
+        }
+    }
+    NzWidth = 5;
+    Length = Size * NzWidth;
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Allocate memory
+   	/////////////////////////////////////////////////////////////////////////
+	matrixA = allocate_mat_f(Size, Size);
+    Anz = allocate_mat_f(1, Length);
+    cIdx = allocate_mat_f(1, Length);
+    x = allocate_mat_f(1, Size);
+    b = allocate_mat_f(1, Size);
+    bdash = allocate_mat_f(1, Size);
+    error = allocate_mat_f(1, Size);
+    csrNz = allocate_mat_f(1, Length);
+    csrCols = (int*)malloc(sizeof *csrCols * Length);
+    csrRowStart = (int *)malloc(sizeof *csrRowStart * (Size + 1));
+
+    if (!matrixA || !Anz || !cIdx || !x || !b || !bdash || !error || !csrNz || !csrCols || !csrRowStart)
+    {
+        if (!cmd.Quiet)
+        {
+            fprintf(stderr, "Error: Memory Allocation.\n");
+        }
+        retval = -1;
+        goto cleanup;
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Prepare and print input data 
+   	/////////////////////////////////////////////////////////////////////////
+
+    // Prepare matrixA
+    createSymmetrixPositiveDefiniteMatrix(matrixA, Size, NzWidth);
+    createCSRFromSparseMatrix(matrixA, csrNz, csrCols, csrRowStart, Size, Length);
+    reshuffleData(csrNz, csrCols, csrRowStart, Anz, cIdx, Size, NzWidth);
+
+    if (cmd.Verbose)
+    {
+        printf("matrix A: \n");
+        for (i = 0; i < Size; i++)
+        {
+            for (j = 0; j < Size; j++)
+            {
+                printf("%3.0f ", matrixA[i * Size + j]);
+            }
+            printf("\n");
+        }
+    }
+
+    // Prepare vectors x and b.
+    fill_mat_f(x, 1, Size, 1, ZERO);
+    fill_mat_f(b, 1, Size, Size, RANDOM);   // Build a random vector whose values are beteen 0 & Size.
+
+    if (cmd.Verbose)
+    {
+        print_mat_f("vector b: \n", "%3.0f ", b, 1, Size);
+        print_mat_f("CSR Nz: \n", "%3lf ", csrNz, 1, Length);
+        print_mat_f("A Nz: \n", "%3lf ", Anz, 1, Length);
+        print_mat_f("Indices: \n", "%3.2lf ", cIdx, 1, Length);
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+    // Brook code block
+   	/////////////////////////////////////////////////////////////////////////
+    {
+        float  AStrm<Size, NzWidth>;
+        float  cIdxStrm<Size, NzWidth>;
+        float  productsStrm<Size, NzWidth>;
+        float  vecGatherStrm<Size, NzWidth>;
+
+        float  xStrm<Size,1>;   // solution vector
+        float  bStrm<Size,1>;   // rhs vector
+
+        // required temporaries for the CG method
+        float  rStrm<Size,1>;
+	float  tStrm<Size,1>;
+        float  qStrm<Size,1>;
+        float  dStrm<Size,1>;
+        float  tmpStrm<Size,1>;
+
+		// Record GPU Total time
+		Start(0);
+
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+			// read in the matrix data
+			streamRead(AStrm, Anz);
+			streamRead(cIdxStrm, cIdx);
+
+			streamRead(xStrm, x);
+			streamRead(bStrm, b);
+
+			// Record GPU Compute time
+			Start(1);
+
+			// Ax_0
+			// these two lines constitute a sparse matrix-vector multiply
+			sparse_matmult_product( cIdxStrm, xStrm, AStrm, productsStrm );
+			sum( productsStrm, tStrm );
+
+			// r = b - Ax
+			subtract(bStrm, tStrm, rStrm);
+
+			// d = r
+			copy(rStrm, dStrm);
+
+
+			// resNormNew = r dot r
+			resNew = 0.0f;
+
+			square(rStrm, tmpStrm);
+			sum(tmpStrm, resNew);
+			convergeThresh = Epsilon * Epsilon * resNew;
+
+
+			if (!cmd.Quiet)
+			{
+				printf("Initial R Norm = %f\n", resNew);
+				printf("Max Iterations = %d\n", cmd.Iterations);
+				printf("Epsilon        = %f\n", Epsilon);
+				printf("Converge Threash = %f\n", convergeThresh);
+				printf("Starting Res = %f\n", resNew);
+			}
+
+			i = 0;
+
+			// CG loop.  Note, for simplicty the convergence is checked after after
+			// each loop iteration.  However, in a practical implementation, multiple
+			// iterations should be run on the hardware before reading back the residual
+			// to check performance.
+			while (i < convergeIterations && resNew > convergeThresh ) 
+			{
+
+				if (i > 0)
+					scaleAdd(rStrm, dStrm, resNew / resOld, dStrm);
+
+				// q = Ad
+				// these two lines constitute a sparse matrix-vector multiply
+				sparse_matmult_product( cIdxStrm, dStrm, AStrm, productsStrm );
+
+				sum( productsStrm, qStrm );
+
+				// alpha = d dot q
+				mult(dStrm, qStrm, tmpStrm);
+
+				sum(tmpStrm, alpha);
+
+				alpha = resNew / alpha;
+
+				// x = x + alpha * d 
+				scaleAdd(xStrm, dStrm, alpha, xStrm);
+
+				// r = r - alpha * q
+				scaleAdd(rStrm, qStrm, -1.0f * alpha, rStrm);
+
+				// resNew = r dot r
+				resOld = resNew;
+				square(rStrm, tmpStrm);
+				sum(tmpStrm, resNew);
+
+				i++;
+				if ((cmd.Verbose) || (!cmd.Quiet))
+				{
+					printf("Iteration: %3d  Residual Norm: %.9lf\n", i, resNew);
+				}
+			}   
+			Stop(1);
+
+			// Write data back from stream here
+			streamWrite(xStrm, x);
+		}
+		Stop(0);
+    }
+
+	/////////////////////////////////////////////////////////////////////////
+	// Print timing information if requested 
+	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Timing)
+    {
+		double time = GetElapsedTime(0);
+		double compute_time = GetElapsedTime(1);
+		printf(	"%-8s%-8s%-16s%-16s%-16s\n","Width","Height","Iterations",
+				"GPU Total Time","GPU Compute Time");
+		printf( "%-8d%-8d%-16d%-16lf%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, time, compute_time);
+		printf("\n\n");
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Verify against CPU implementation if requested
+   	/////////////////////////////////////////////////////////////////////////
+    if (cmd.Verify)
+    {
+        // Bdash is A times solution vector. Bdash = Ax
+        // Check for correctness by checking if (Ax - B)[i] < some epsilon
+        // Increase iteration count for accurate results
+        int res = 0;
+
+		printf("-e Verify correct output.\n");
+		printf("Performing conjugate gradient method on CPU ... ");
+
+        for (i=0; i < Size; i++)
+        {
+            bdash[i] = 0;
+            for (j=0; j < Size; j++)
+            {
+                bdash[i] += matrixA[i * Size + j] * x[j];
+            }
+        }
+		printf("Done\n");
+
+		// Compare CPU and GPU results for correctness
+        res = compare_mat_f(b, bdash, 1, Size);
+
+        if (cmd.Verbose)
+        {
+            print_mat_f("B: \n", "%3.2lf ", b, 1, Size);
+            print_mat_f("Bdash : \n", "%3.2lf ", bdash, 1, Size);
+        }
+
+        if (res)
+        {
+            printf("%s: Failed!\n\n", argv[0]);
+            retval = -1;
+        }
+        else
+        {
+            printf("%s: Passed!\n\n", argv[0]);
+            retval = 0;
+        }
+    }
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Compare performance with CPU if requested
+   	/////////////////////////////////////////////////////////////////////////
+	if(cmd.Performance)
+	{	
+		double cpu_time = 0.0;
+		double gpu_time = 0.0;
+
+		printf("-p Compare performance with CPU.\n");
+
+		// Record CPU Total Time 
+		Start(2);
+        for (i = 0; i < cmd.Iterations; ++i)
+        {
+			for (i=0; i < Size; i++)
+			{
+				bdash[i] = 0;
+				for (j=0; j < Size; j++)
+				{
+					bdash[i] += matrixA[i * Size + j] * x[j];
+				}
+			}
+		}
+		Stop(2);
+
+		// Print CPU timing and speedup
+		cpu_time = GetElapsedTime(2);
+		gpu_time = GetElapsedTime(0);
+		printf(	"%-8s%-8s%-16s%-16s%-16s%-16s\n","Width","Height","Iterations",
+				"CPU Total Time","GPU Total Time","Speedup");
+		printf(	"%-8d%-8d%-16d%-16lf%-16lf%-16lf", cmd.Width, cmd.Height, 
+				cmd.Iterations, cpu_time, gpu_time, cpu_time/gpu_time);
+		printf("\n\n");
+	}
+
+   	/////////////////////////////////////////////////////////////////////////
+	// Clean up
+   	/////////////////////////////////////////////////////////////////////////
+cleanup:
+    if (matrixA)
+    {
+        free(matrixA);
+    }
+    if (Anz)
+    {
+        free(Anz);
+    }
+    if (cIdx)
+    {
+        free(cIdx);
+    }
+    if (x)
+    {
+        free(x);
+    }
+    if (b)
+    {
+        free(b);
+    }
+    if (bdash)
+    {
+        free(bdash);
+    }
+    if (error)
+    {
+        free(error);
+    }
+    if (csrNz)
+    {
+        free(csrNz);
+    }
+    if (csrCols)
+    {
+        free(csrCols);
+    }
+    if (csrRowStart)
+    {
+        free(csrRowStart);
+    }
+
+    if (!cmd.Verify)
+    {
+        printf("\nPress enter to exit...\n");
+        getchar();
+    }
+
+    return retval;
+}
