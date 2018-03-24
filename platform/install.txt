@@ -1,0 +1,62 @@
+sudo apt-get install cmake libboost-all-dev
+
+
+wget https://downloads.sourceforge.net/project/calpp/calpp-0.90/calpp-0.90.tar.gz?r=https%3A%2F%2Fsourceforge.net%2Fprojects%2Fcalpp%2Ffiles%2Fcalpp-0.90%2Fcalpp-0.90.tar.gz%2Fdownload&ts=1521905613
+tar -xzvf calpp-0.90.tar.gz
+ cd calpp-0.90/ 
+ cd include/
+sudo scp -p -r cal /usr/local/include
+
+
+
+
+git clone https://github.com/GPUOpen-Tools/common-lib-AMD-CAL-8.95.git
+cd common-lib-AMD-CAL-8.95
+cd 8.95
+cd lib/x86_64
+cp * ~/my/BrookPlus/platform/runtime/lib/lnx_x86_64
+
+
+
+cd BrookPlus/platform
+cd ~/my
+git clone https://github.com/clockfort/amd-app-sdk-fixes.git
+cd amd-app-sdk-fixes/include/CAL
+cp * ~/my/BrookPlus/platform/include
+
+
+
+
+
+
+cp -p -r cal /usr/local/include/cal include
+cd include
+cp cal.hpp cal.h
+cp cal_il_atomics.hpp cal_il_atomics.h
+cp cal_il_flat2d.hpp cal_il_flat2d.h
+cp cal_il.hpp cal_il.h
+cp cal_il_math.hpp cal_il_math.h
+cp cal_il_rv7xx.hpp cal_il_rv7xx.hpp.h
+
+
+cd ~/my/BrookPlus
+make
+cd ~/my/BrookPlus/platform/runtime/lib/lnx_x86_64
+sudo cp * /usr/local/lib
+
+cd ~/my/BrookPlus/platform/runtime/lib/lnx_x86_64
+sudo cp * /usr/local/lib 
+
+
+cd ~/my/BrookPlus/platform/brcc/bin/lnx_x86_64
+sudo cp * /usr/local/bin
+
+cd ~/my/BrookPlus/sdk/lib
+ sudo cp libbrook.so libbrook_cal.so /usr/local/lib
+
+~/my/BrookPlus/sdk/bin
+sudo cp brcc /usr/local/bin
+
+
+sudo cd /usr/local/lib
+

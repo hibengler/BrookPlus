@@ -288,7 +288,8 @@ template <> class GetValueOf <unsigned short> {public:
 template <> class GetValueOf <bool> {public:
     typedef bool type;
 };
-#if defined (_MSC_VER)
+//#if defined (_MSC_VER)
+#if 1
 template <class T> class Holder {
 public:
     static typename GetValueOf<T>::type getAt (const T&t, int i) {

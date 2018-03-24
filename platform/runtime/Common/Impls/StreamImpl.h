@@ -49,6 +49,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "Device.h"
 #include "ExportDef.h"
 #include <map>
+#include <string>
 
 class Buffer;
 class BaseDevice;

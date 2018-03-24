@@ -94,6 +94,9 @@ jurisdiction and venue of these courts.
 PARAMETER(p_select, "select");
 PARAMETER(p_input,  "input");
 
+extern "C" {
+#include <stdio.h>
+};
 
 PreprocessorState::StringPair PreprocessorState::parsePreprocessorLine( const char* c )
 {

@@ -89,6 +89,11 @@ jurisdiction and venue of these courts.
 #ifndef AMD_ILREGISTER_HPP
 #define AMD_ILREGISTER_HPP
 
+extern "C" {
+#include <string.h>
+/* for MEMCPY */
+}
+
 #include "convert.hpp"
 
 #ifndef IL_BIT

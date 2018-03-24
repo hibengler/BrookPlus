@@ -36,6 +36,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "KernelDescData.h"
 #include <cassert>
 
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+
 namespace brook
 {
     ////////////////////////////////////////////////////////////////////////////////
@@ -46,7 +50,7 @@ namespace brook
     ////////////////////////////////////////////////////////////////////////////////
 
     PassData::PassData(const char* name) : _refCount(1), Name(name),
-                                           Image(NULL), computeFlag(false)
+                                           Image((const char *)NULL), computeFlag(false)
     {
         ConstArrays = new ArgDesc;
         Constants   = new ArgDesc;

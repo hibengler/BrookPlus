@@ -86,7 +86,8 @@ courts in Austin, Texas, and all defenses are hereby waived concerning personal
 jurisdiction and venue of these courts.
 ============================================================ */
 
-
+#include <stdlib.h>
+#include <string.h>
 #include "cal.h"
 #include "calcl.h"
 #include "calutAMDhlslCompiler.h"
